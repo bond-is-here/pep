@@ -77,6 +77,25 @@ public final class WorkoutStore {
         Array(Set(sessionsThisWeek.compactMap(\.finishedAt).map { calendar.startOfDay(for: $0) })).sorted()
     }
 
+    /// Calendar helpers keep the Today and Progress surfaces aligned with the
+    /// same locale, time zone, and injected clock used for weekly totals.
+    public var currentWeekDays: [Date] {
+        let today = calendar.startOfDay(for: now())
+        let firstDay = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: firstDay) }
+    }
+
+    public func isToday(_ date: Date) -> Bool {
+        calendar.isDate(date, inSameDayAs: now())
+    }
+
+    public func completedSessionCount(on day: Date) -> Int {
+        sessions.filter { session in
+            guard let finishedAt = session.finishedAt else { return false }
+            return calendar.isDate(finishedAt, inSameDayAs: day)
+        }.count
+    }
+
     public var totalVolumeKG: Double { sessions.reduce(0) { $0 + $1.volumeKG } }
 
     /// Finished history and library changes succeed only after being saved. Active
@@ -144,13 +163,17 @@ public final class WorkoutStore {
         return true
     }
 
+    /// Updates a set in memory and, by default, persists it immediately. UI
+    /// editors can pass `persist: false` while a user is typing and commit the
+    /// final valid value when focus leaves the field. This keeps large logs
+    /// responsive without weakening the store's normal save-on-change API.
     @discardableResult
-    public func updateSet(exerciseID: UUID, setID: UUID, reps: Int, weightKG: Double) -> Bool {
+    public func updateSet(exerciseID: UUID, setID: UUID, reps: Int, weightKG: Double, persist: Bool = true) -> Bool {
         guard !isReadOnly, (1...1_000).contains(reps), weightKG.isFinite, (0...1_500).contains(weightKG),
               let indexes = setIndexes(exerciseID: exerciseID, setID: setID) else { return false }
         activeSession!.exercises[indexes.exercise].sets[indexes.set].reps = reps
         activeSession!.exercises[indexes.exercise].sets[indexes.set].weightKG = weightKG
-        save()
+        if persist { save() }
         return true
     }
 
@@ -462,7 +485,10 @@ public final class WorkoutStore {
             }
         }
         if let rest = snapshot.restEndsAt {
-            guard snapshot.activeSession != nil, Self.validDate(rest) else { throw WorkoutBackupError.invalidData }
+            guard let active = snapshot.activeSession,
+                  rest >= active.startedAt,
+                  rest <= now().addingTimeInterval(3_600),
+                  Self.validDate(rest) else { throw WorkoutBackupError.invalidData }
         }
         for weight in snapshot.weights {
             guard Self.validDate(weight.date), weight.kilograms.isFinite, weight.kilograms > 0, weight.kilograms <= 1_000 else {
@@ -535,13 +561,15 @@ public final class WorkoutStore {
               routine.subtitle.count <= 200, routine.symbol.count <= 100,
               !routine.exercises.isEmpty, routine.exercises.count <= 40,
               Set(routine.exercises.map(\.id)).count == routine.exercises.count else { return nil }
+        var exerciseNames = Set<String>()
         for index in routine.exercises.indices {
             routine.exercises[index].name = routine.exercises[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
             let exercise = routine.exercises[index]
             guard !exercise.name.isEmpty, exercise.name.count <= 100,
                   exercise.category.count <= 100,
                   (1...20).contains(exercise.sets), (1...1_000).contains(exercise.reps),
-                  (0...3_600).contains(exercise.restSeconds) else { return nil }
+                  (0...3_600).contains(exercise.restSeconds),
+                  exerciseNames.insert(exercise.name.lowercased()).inserted else { return nil }
         }
         return routine
     }

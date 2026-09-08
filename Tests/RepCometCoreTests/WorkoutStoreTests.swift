@@ -122,6 +122,25 @@ final class WorkoutStoreTests: XCTestCase {
         XCTAssertEqual(store.activeSession?.volumeKG, 0)
     }
 
+    func testSetDraftCanUpdateMemoryWithoutWritingUntilCommitted() throws {
+        let store = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(store.startWorkout(makeRoutine()))
+        let exercise = try XCTUnwrap(store.activeSession?.exercises.first)
+        let set = try XCTUnwrap(exercise.sets.first)
+        let savedBeforeDraft = try Data(contentsOf: fileURL)
+
+        XCTAssertTrue(store.updateSet(exerciseID: exercise.id, setID: set.id, reps: 12, weightKG: 42.5, persist: false))
+        XCTAssertEqual(store.activeSession?.exercises.first?.sets.first?.weightKG, 42.5)
+        XCTAssertEqual(store.activeSession?.exercises.first?.sets.first?.reps, 12)
+        XCTAssertEqual(try Data(contentsOf: fileURL), savedBeforeDraft, "Typing a valid draft must not rewrite the full log for every character.")
+
+        XCTAssertTrue(store.save(), "A valid draft can be committed once after editing finishes.")
+        XCTAssertNotEqual(try Data(contentsOf: fileURL), savedBeforeDraft)
+        let restored = WorkoutStore(fileURL: fileURL)
+        XCTAssertEqual(restored.activeSession?.exercises.first?.sets.first?.weightKG, 42.5)
+        XCTAssertEqual(restored.activeSession?.exercises.first?.sets.first?.reps, 12)
+    }
+
     func testRenamedRoutineKeepsItsPreviousWeightsAndDuplicateNamesAreRejected() throws {
         let store = WorkoutStore(fileURL: fileURL)
         var routine = makeRoutine()
@@ -206,6 +225,9 @@ final class WorkoutStoreTests: XCTestCase {
         routine = makeRoutine(sets: 0)
         XCTAssertFalse(store.addRoutine(routine))
         routine = makeRoutine()
+        routine.exercises.append(ExerciseTemplate(name: "  bench PRESS  ", category: "Chest"))
+        XCTAssertFalse(store.addRoutine(routine), "Exercise names must be unique so previous weights cannot be assigned ambiguously.")
+        routine = makeRoutine()
         routine.exercises.append(routine.exercises[0])
         XCTAssertFalse(store.addRoutine(routine), "Repeated identifiers cannot be addressed safely by set editors.")
         routine = makeRoutine()
@@ -237,8 +259,12 @@ final class WorkoutStoreTests: XCTestCase {
         try logWorkout() // Previous Sunday.
         currentDate = monday
         try logWorkout() // Inclusive start boundary.
+        XCTAssertEqual(store.currentWeekDays.first, monday)
+        XCTAssertTrue(store.isToday(monday))
+        XCTAssertEqual(store.completedSessionCount(on: monday), 1)
         currentDate = monday.addingTimeInterval(3_600)
         try logWorkout() // Same day, second session.
+        XCTAssertEqual(store.completedSessionCount(on: monday), 2)
         currentDate = monday.addingTimeInterval(86_400)
         try logWorkout() // Tuesday.
         XCTAssertEqual(store.sessionsThisWeek.count, 3)

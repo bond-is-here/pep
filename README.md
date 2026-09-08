@@ -40,7 +40,7 @@ Minimum deployment target: **iOS 17**. The project supports iPhone and iPad, wit
 
 `WorkoutStore` saves an atomic JSON snapshot under the app's Application Support directory at `RepComet/workouts.json`. Routine changes, valid set edits, active workouts, rest deadlines, weight entries, units, and goals persist automatically. Rest timers use an absolute date and resume correctly after backgrounding or reopening the app; they do not send notifications while the app is closed.
 
-Appearance preferences live separately in `RepComet/appearance.json`, so changing palettes or motion does not alter a workout or its history.
+Appearance preferences live separately in `RepComet/appearance.json`, so changing palettes or motion does not alter a workout or its history. While you type a set value, Pep keeps the valid draft in memory and commits it when focus leaves the field, the workout is minimized, or the app backgrounds; this keeps large logs responsive without sacrificing recovery at lifecycle boundaries.
 
 The source folder retains its original `RepComet` path, and the app retains bundle identifier `app.repcomet.ios`. Its project, display name, build product, and shared Xcode scheme are **Pep**. Keeping the identifier and storage paths preserves compatibility with existing installations.
 

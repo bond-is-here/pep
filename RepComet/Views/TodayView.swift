@@ -13,10 +13,7 @@ struct TodayView: View {
     }
 
     private var weekDays: [Date] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let firstDay = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: firstDay) }
+        store.currentWeekDays
     }
 
     var body: some View {
@@ -143,8 +140,8 @@ struct TodayView: View {
             }
             HStack(spacing: 7) {
                 ForEach(weekDays, id: \.self) { day in
-                    let isToday = Calendar.current.isDateInToday(day)
-                    let completed = store.weeklyCompletedDays.contains { Calendar.current.isDate($0, inSameDayAs: day) }
+                    let isToday = store.isToday(day)
+                    let completed = store.completedSessionCount(on: day) > 0
                     VStack(spacing: 6) {
                         Text(day.formatted(.dateTime.weekday(.narrow)))
                             .font(.system(size: 9, weight: .bold, design: .rounded))
