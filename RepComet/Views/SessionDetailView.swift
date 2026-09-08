@@ -3,6 +3,10 @@ import SwiftUI
 struct SessionDetailView: View {
     let session: WorkoutSession
     let unit: WeightUnit
+    var store: WorkoutStore? = nil
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmingDelete = false
+    @State private var deleteError: String?
 
     var body: some View {
         ScrollView {
@@ -26,10 +30,22 @@ struct SessionDetailView: View {
                 }
                 Text("Volume is the sum of weight × reps for your completed sets. Bodyweight sets still count toward your set total.")
                     .font(.system(size: 11)).foregroundStyle(RCTheme.muted).lineSpacing(3)
+                if let store {
+                    if let deleteError { Text(deleteError).font(.callout).foregroundStyle(RCTheme.text) }
+                    Button("Delete workout", role: .destructive) { confirmingDelete = true }
+                        .frame(maxWidth: .infinity, minHeight: 44).disabled(store.isReadOnly)
+                        .accessibilityIdentifier("session.delete")
+                }
             }.padding(22).padding(.bottom, 20)
         }
         .foregroundStyle(RCTheme.text).background(RCTheme.background.ignoresSafeArea()).preferredColorScheme(RCAppearance.shared.colorScheme)
         .navigationTitle("Workout recap").navigationBarTitleDisplayModeIfAvailable()
+        .confirmationDialog("Delete this saved workout?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete workout", role: .destructive) {
+                if store?.deleteSession(id: session.id) == true { dismiss() }
+                else { deleteError = store?.persistenceError ?? "The workout couldn't be deleted. Please try again." }
+            }
+        } message: { Text("This removes the workout from your log and updates your progress. Your routine and other workouts stay saved.") }
     }
 
     private func completedExercise(_ exercise: SessionExercise) -> some View {

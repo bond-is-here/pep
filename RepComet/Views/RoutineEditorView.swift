@@ -11,6 +11,7 @@ struct RoutineEditorView: View {
     @State private var showingDelete = false
     @State private var showingDiscard = false
     @State private var error: String?
+    @FocusState private var nameFocused: Bool
     private let symbols = ["dumbbell.fill", "bolt.fill", "figure.strengthtraining.traditional", "figure.run", "flame.fill", "sparkles"]
 
     init(store: WorkoutStore, routine: Routine? = nil) {
@@ -32,10 +33,15 @@ struct RoutineEditorView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         FlowFieldLabel(title: "ROUTINE NAME")
                         TextField("e.g. Monday feel-good", text: $name)
+                            .focused($nameFocused).submitLabel(.done).onSubmit { nameFocused = false }
+                            .accessibilityIdentifier("routine.name")
                             .font(.system(size: 20, weight: .semibold, design: .rounded))
                             .padding(17).background(RCTheme.card, in: RoundedRectangle(cornerRadius: 16))
                             .overlay(RoundedRectangle(cornerRadius: 16).stroke(RCTheme.border, lineWidth: 1))
-                            .textFieldStyle(.plain).onChange(of: name) { _, value in if value.count > 80 { name = String(value.prefix(80)) } }
+                            .textFieldStyle(.plain).onChange(of: name) { _, value in
+                                if value.count > 80 { name = String(value.prefix(80)) }
+                                error = nil
+                            }
                         HStack(spacing: 10) {
                             ForEach(symbols, id: \.self) { icon in
                                 Button { symbol = icon } label: {
@@ -53,7 +59,7 @@ struct RoutineEditorView: View {
                         HStack {
                             FlowFieldLabel(title: "YOUR EXERCISES")
                             Spacer()
-                            Text("\(exercises.count) selected").font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(RCTheme.muted)
+                            Text("\(exercises.count)/40 selected").font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(RCTheme.muted)
                         }
                         if exercises.isEmpty {
                             VStack(spacing: 14) {
@@ -66,6 +72,12 @@ struct RoutineEditorView: View {
                             routineExercise(exercise, index: index)
                         }
                         RCSecondaryButton(title: "Add exercises", icon: "plus") { showingLibrary = true }
+                            .disabled(exercises.count >= 40).opacity(exercises.count < 40 ? 1 : 0.5)
+                            .accessibilityIdentifier("routine.add-exercises")
+                        if exercises.count >= 40 {
+                            Text("Your routine has 40 exercises. Remove one to add another.")
+                                .font(.system(size: 12)).foregroundStyle(RCTheme.muted)
+                        }
                     }
 
                     if !exercises.isEmpty {
@@ -75,9 +87,13 @@ struct RoutineEditorView: View {
                             Text("~\(Routine(name: name, exercises: exercises).estimatedMinutes) min")
                         }.font(.system(size: 12)).foregroundStyle(RCTheme.muted)
                     }
-                    if let error { Text(error).font(.system(size: 13)).foregroundStyle(.orange) }
+                    if let error {
+                        Text(error).font(.system(size: 13)).foregroundStyle(RCTheme.accentText)
+                            .accessibilityIdentifier("routine.error")
+                    }
                     RCPrimaryButton(title: routine == nil ? "Create routine" : "Save changes", icon: "checkmark") { saveRoutine() }
                         .disabled(!canSave).opacity(canSave ? 1 : 0.45)
+                        .accessibilityIdentifier("routine.save")
                     if routine != nil {
                         Button("Delete routine", role: .destructive) { showingDelete = true }
                             .font(.system(size: 13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
@@ -94,10 +110,16 @@ struct RoutineEditorView: View {
             }
             .interactiveDismissDisabled(hasChanges)
             .sheet(isPresented: $showingLibrary) {
-                ExerciseLibraryView(existingNames: Set(exercises.map { $0.name.lowercased() })) { additions in exercises.append(contentsOf: additions) }
+                ExerciseLibraryView(existingNames: Set(exercises.map { exerciseNameKey($0.name) }), remainingCapacity: max(0, 40 - exercises.count)) { additions in
+                    exercises.append(contentsOf: additions)
+                    error = nil
+                }
             }
             .confirmationDialog("Delete this routine?", isPresented: $showingDelete, titleVisibility: .visible) {
-                Button("Delete routine", role: .destructive) { if let routine { store.deleteRoutine(id: routine.id) }; dismiss() }
+                Button("Delete routine", role: .destructive) {
+                    if let routine, store.deleteRoutine(id: routine.id) { dismiss() }
+                    else { error = store.persistenceError ?? "This routine could not be deleted. Try again." }
+                }
             } message: { Text("Your completed workout history will stay in your log.") }
             .confirmationDialog("Discard your changes?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Discard changes", role: .destructive) { dismiss() }
@@ -123,12 +145,12 @@ struct RoutineEditorView: View {
                 }.accessibilityLabel("Options for \(exercise.name)")
             }
             HStack(spacing: 12) {
-                configurationPicker("SETS", value: exerciseBinding(id: exercise.id, keyPath: \.sets), values: Array(1...12))
+                configurationPicker("SETS", value: exerciseBinding(id: exercise.id, keyPath: \.sets), values: Array(1...20))
                 configurationPicker("REPS", value: exerciseBinding(id: exercise.id, keyPath: \.reps), values: Array(1...50))
                 VStack(alignment: .leading, spacing: 5) {
                     FlowFieldLabel(title: "REST")
                     Picker("Rest between sets", selection: exerciseBinding(id: exercise.id, keyPath: \.restSeconds)) {
-                        ForEach([0, 30, 45, 60, 90, 120, 150, 180, 240, 300], id: \.self) { Text($0 == 0 ? "None" : "\($0)s").tag($0) }
+                        ForEach(Array(Set([0, 30, 45, 60, 90, 120, 150, 180, 240, 300, exercise.restSeconds])).sorted(), id: \.self) { Text($0 == 0 ? "None" : "\($0)s").tag($0) }
                     }.pickerStyle(.menu).labelsHidden().accessibilityLabel("Rest between sets")
                         .tint(RCTheme.text).frame(maxWidth: .infinity, minHeight: 44)
                         .background(RCTheme.background, in: RoundedRectangle(cornerRadius: 10))
@@ -141,7 +163,7 @@ struct RoutineEditorView: View {
         VStack(alignment: .leading, spacing: 5) {
             FlowFieldLabel(title: title)
             Picker(title.capitalized, selection: value) {
-                ForEach(values, id: \.self) { Text("\($0)").tag($0) }
+                ForEach(Array(Set(values + [value.wrappedValue])).sorted(), id: \.self) { Text("\($0)").tag($0) }
             }.pickerStyle(.menu).labelsHidden().accessibilityLabel(title.capitalized)
                 .tint(RCTheme.text).frame(maxWidth: .infinity, minHeight: 44)
                 .background(RCTheme.background, in: RoundedRectangle(cornerRadius: 10))
@@ -156,8 +178,17 @@ struct RoutineEditorView: View {
 
     private func saveRoutine() {
         let updated = Routine(id: routine?.id ?? UUID(), name: name.trimmingCharacters(in: .whitespacesAndNewlines), subtitle: routine?.subtitle ?? "Built for your rhythm", symbol: symbol, exercises: exercises)
+        guard !store.routines.contains(where: { $0.id != updated.id && $0.name.caseInsensitiveCompare(updated.name) == .orderedSame }) else {
+            error = "You already have a routine named “\(updated.name)”. Choose a different name."
+            return
+        }
+        guard exercises.count <= 40 else {
+            error = "Keep your routine to 40 exercises. Remove a move before saving."
+            return
+        }
         let saved = routine == nil ? store.addRoutine(updated) : store.updateRoutine(updated)
-        if saved { dismiss() } else { error = "Add a routine name and at least one valid exercise." }
+        if saved { nameFocused = false; dismiss() }
+        else { error = store.persistenceError ?? "Check your routine name and exercise settings, then try saving again." }
     }
 
     private func iconLabel(_ icon: String) -> String {
@@ -174,6 +205,7 @@ struct RoutineEditorView: View {
 
 private struct ExerciseLibraryView: View {
     let existingNames: Set<String>
+    let remainingCapacity: Int
     let onAdd: ([ExerciseTemplate]) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
@@ -182,6 +214,7 @@ private struct ExerciseLibraryView: View {
     @State private var showingCustom = false
     @State private var customName = ""
     @State private var customExercises: [ExerciseTemplate] = []
+    @State private var selectionError: String?
 
     private var library: [ExerciseTemplate] { WorkoutStore.exerciseLibrary + customExercises }
     private var categories: [String] { ["All"] + Array(Set(library.map(\.category))).sorted() }
@@ -203,6 +236,11 @@ private struct ExerciseLibraryView: View {
                         }
                     }.padding(.horizontal, 20).padding(.vertical, 12)
                 }
+                if let selectionError {
+                    Text(selectionError).font(.system(size: 13)).foregroundStyle(RCTheme.accentText)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 10)
+                        .accessibilityIdentifier("library.error")
+                }
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(filtered) { exercise in libraryRow(exercise) }
@@ -212,15 +250,21 @@ private struct ExerciseLibraryView: View {
                         Button { customName = search; showingCustom = true } label: {
                             Label("Create custom exercise", systemImage: "plus.circle").font(.system(size: 14, weight: .medium)).frame(maxWidth: .infinity, minHeight: 54)
                         }.buttonStyle(.plain).foregroundStyle(RCTheme.accentText).padding(.top, 10)
+                            .accessibilityIdentifier("library.custom")
                     }.padding(.horizontal, 20).padding(.bottom, 18)
                 }
                 RCPrimaryButton(title: "Add \(selected.count) exercise\(selected.count == 1 ? "" : "s")", icon: "plus") {
+                    guard selected.count <= remainingCapacity else {
+                        selectionError = "You can add \(remainingCapacity) more exercises. Deselect a move to continue."
+                        return
+                    }
                     let additions = library.filter { selected.contains($0.id) }.map {
                         ExerciseTemplate(name: $0.name, category: $0.category, sets: $0.sets, reps: $0.reps, restSeconds: $0.restSeconds)
                     }
                     onAdd(additions)
                     dismiss()
                 }.disabled(selected.isEmpty).opacity(selected.isEmpty ? 0.45 : 1).padding(20)
+                    .accessibilityIdentifier("library.add-selected")
             }
             .background(RCTheme.background.ignoresSafeArea()).preferredColorScheme(RCAppearance.shared.colorScheme)
             .navigationTitle("Exercise library").navigationBarTitleDisplayModeIfAvailable()
@@ -230,14 +274,28 @@ private struct ExerciseLibraryView: View {
                 TextField("Exercise name", text: $customName)
                 Button("Add") {
                     let trimmed = customName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
+                    guard !trimmed.isEmpty, trimmed.count <= 80 else {
+                        selectionError = "Use an exercise name with 1–80 characters. Tap Create custom exercise to try again."
+                        return
+                    }
+                    guard !existingNames.contains(exerciseNameKey(trimmed)) else {
+                        selectionError = "“\(trimmed)” is already in your routine. You can adjust its sets there."
+                        return
+                    }
                     if let existing = library.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-                        if !existingNames.contains(existing.name.lowercased()) { selected.insert(existing.id) }
+                        guard !selected.contains(existing.id) else {
+                            selectionError = "“\(trimmed)” is already selected. Use Add exercises below to add your selection."
+                            return
+                        }
+                        guard selected.count < remainingCapacity else { showCapacityError(); return }
+                        selected.insert(existing.id)
                     } else {
-                        let exercise = ExerciseTemplate(name: String(trimmed.prefix(80)), category: "Custom")
+                        guard selected.count < remainingCapacity else { showCapacityError(); return }
+                        let exercise = ExerciseTemplate(name: trimmed, category: "Custom")
                         customExercises.append(exercise)
                         selected.insert(exercise.id)
                     }
+                    selectionError = nil
                     category = "All"
                     search = ""
                 }
@@ -247,10 +305,15 @@ private struct ExerciseLibraryView: View {
     }
 
     private func libraryRow(_ exercise: ExerciseTemplate) -> some View {
-        let alreadyAdded = existingNames.contains(exercise.name.lowercased())
+        let alreadyAdded = existingNames.contains(exerciseNameKey(exercise.name))
         let isSelected = selected.contains(exercise.id)
         return Button {
-            if isSelected { selected.remove(exercise.id) } else { selected.insert(exercise.id) }
+            if isSelected { selected.remove(exercise.id) }
+            else {
+                guard selected.count < remainingCapacity else { showCapacityError(); return }
+                selected.insert(exercise.id)
+            }
+            selectionError = nil
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: "dumbbell.fill").font(.system(size: 17)).foregroundStyle(RCTheme.muted).frame(width: 36)
@@ -264,7 +327,16 @@ private struct ExerciseLibraryView: View {
             }.padding(16).frame(minHeight: 76).rcSurface(padding: 0)
         }.buttonStyle(RCPressStyle()).disabled(alreadyAdded).opacity(alreadyAdded ? 0.5 : 1)
             .accessibilityLabel("\(exercise.name), \(alreadyAdded ? "already added" : isSelected ? "selected" : "not selected")")
+            .accessibilityIdentifier("library.exercise.\(exercise.name)")
     }
+
+    private func showCapacityError() {
+        selectionError = "A routine can have 40 exercises. Deselect a move to choose another, or add your current selection."
+    }
+}
+
+private func exerciseNameKey(_ name: String) -> String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 }
 
 struct FlowFieldLabel: View {

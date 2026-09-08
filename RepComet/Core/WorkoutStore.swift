@@ -1,8 +1,42 @@
 import Foundation
 import Observation
 
+public struct WorkoutBackupSummary: Equatable, Sendable {
+    public let routineCount: Int
+    public let sessionCount: Int
+    public let weightCount: Int
+    public let hasActiveWorkout: Bool
+}
+
+public enum WorkoutBackupError: LocalizedError {
+    case invalidData
+    case unsupportedVersion
+    case activeWorkoutInProgress
+    case readOnly
+    case tooLarge
+    case noRecoveryCopy
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidData:
+            return "This file isn't a valid Pep backup. Choose an unedited backup exported from Pep. Your current data is unchanged."
+        case .unsupportedVersion:
+            return "This backup uses a different Pep data version. Update Pep before opening it. Your current data is unchanged."
+        case .activeWorkoutInProgress:
+            return "Finish or discard your current workout before restoring a backup. Your current data is unchanged."
+        case .readOnly:
+            return "Pep can't replace saved data while it is unavailable or requires a newer app version. Your saved file is unchanged."
+        case .tooLarge:
+            return "This backup is too large to open safely. Pep supports backups up to 20 MB. Your current data is unchanged."
+        case .noRecoveryCopy:
+            return "There is no preserved recovery copy to export. Your current data is unchanged."
+        }
+    }
+}
+
 @Observable
 public final class WorkoutStore {
+    public static let maxBackupBytes = 20_000_000
     public private(set) var routines: [Routine] = []
     public private(set) var sessions: [WorkoutSession] = []
     public private(set) var weights: [WeightEntry] = []
@@ -11,12 +45,17 @@ public final class WorkoutStore {
     public private(set) var unit: WeightUnit = .kg
     public private(set) var weeklyGoal: Int = 3
     public private(set) var persistenceError: String?
+    public private(set) var hasUnsavedChanges = false
+    /// Incompatible or inaccessible existing data must never be overwritten.
+    public var isReadOnly: Bool { !canWrite }
+    public var hasRecoveryCopy: Bool { recoveryFileURL != nil }
 
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private let calendar: Calendar
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var canWrite = true
     @ObservationIgnored private var recoveryNotice: String?
+    @ObservationIgnored private var recoveryFileURL: URL?
 
     /// A file URL and clock can be supplied for isolated stores and deterministic tests.
     public init(fileURL: URL? = nil, calendar: Calendar = .current, now: @escaping () -> Date = Date.init) {
@@ -40,47 +79,65 @@ public final class WorkoutStore {
 
     public var totalVolumeKG: Double { sessions.reduce(0) { $0 + $1.volumeKG } }
 
-    /// Mutation methods return whether the input was accepted. Disk failures are reported in persistenceError.
+    /// Finished history and library changes succeed only after being saved. Active
+    /// set edits stay in memory on a disk failure so the user can retry saving.
     @discardableResult
     public func addRoutine(_ routine: Routine) -> Bool {
-        guard let routine = validatedRoutine(routine),
+        guard !isReadOnly, let routine = validatedRoutine(routine),
               !routines.contains(where: { $0.id == routine.id }),
               !hasRoutineNameConflict(routine) else { return false }
-        routines.append(routine)
-        save()
-        return true
+        var snapshot = currentSnapshot
+        snapshot.routines.append(routine)
+        return persist(snapshot)
     }
 
     @discardableResult
     public func updateRoutine(_ routine: Routine) -> Bool {
-        guard let routine = validatedRoutine(routine),
+        guard !isReadOnly, let routine = validatedRoutine(routine),
               let index = routines.firstIndex(where: { $0.id == routine.id }),
               !hasRoutineNameConflict(routine, excluding: routine.id) else { return false }
-        routines[index] = routine
-        save()
-        return true
+        var snapshot = currentSnapshot
+        let previousName = routines[index].name
+        // Link legacy history before a name change, only when its old name
+        // identifies this one routine unambiguously.
+        if routines.filter({ $0.name.caseInsensitiveCompare(previousName) == .orderedSame }).count == 1 {
+            for sessionIndex in snapshot.sessions.indices where snapshot.sessions[sessionIndex].routineID == nil &&
+                snapshot.sessions[sessionIndex].routineName.caseInsensitiveCompare(previousName) == .orderedSame {
+                snapshot.sessions[sessionIndex].routineID = routine.id
+            }
+            if snapshot.activeSession?.routineID == nil,
+               snapshot.activeSession?.routineName.caseInsensitiveCompare(previousName) == .orderedSame {
+                snapshot.activeSession?.routineID = routine.id
+            }
+        }
+        snapshot.routines[index] = routine
+        return persist(snapshot)
     }
 
     @discardableResult
     public func deleteRoutine(id: UUID) -> Bool {
-        guard routines.contains(where: { $0.id == id }) else { return false }
-        routines.removeAll { $0.id == id }
-        save()
-        return true
+        guard !isReadOnly, routines.contains(where: { $0.id == id }) else { return false }
+        var snapshot = currentSnapshot
+        snapshot.routines.removeAll { $0.id == id }
+        return persist(snapshot)
     }
 
     @discardableResult
     public func startWorkout(_ routine: Routine) -> Bool {
-        guard activeSession == nil, let routine = validatedRoutine(routine) else { return false }
-        let previous = sessions.first { session in
+        guard !isReadOnly, activeSession == nil, let routine = validatedRoutine(routine), Self.validDate(now()) else { return false }
+        let previousSessions = sessions.filter { session in
             if let routineID = session.routineID { return routineID == routine.id }
             return session.routineName.caseInsensitiveCompare(routine.name) == .orderedSame
         }
         activeSession = WorkoutSession(routineID: routine.id, routineName: routine.name, startedAt: now(), exercises: routine.exercises.map { exercise in
-            let previousExercise = previous?.exercises.first { $0.name == exercise.name }
             return SessionExercise(name: exercise.name, sets: (0..<exercise.sets).map { setIndex in
-                let previousSet = previousExercise?.sets.indices.contains(setIndex) == true ? previousExercise?.sets[setIndex] : nil
-                return WorkoutSet(reps: exercise.reps, weightKG: previousSet?.isComplete == true ? previousSet!.weightKG : 0)
+                let previousSet = previousSessions.lazy.compactMap { session -> WorkoutSet? in
+                    guard let previousExercise = session.exercises.first(where: { $0.name.caseInsensitiveCompare(exercise.name) == .orderedSame }),
+                          previousExercise.sets.indices.contains(setIndex) else { return nil }
+                    let set = previousExercise.sets[setIndex]
+                    return set.isComplete ? set : nil
+                }.first
+                return WorkoutSet(reps: exercise.reps, weightKG: previousSet?.weightKG ?? 0)
             }, restSeconds: exercise.restSeconds)
         })
         save()
@@ -89,7 +146,7 @@ public final class WorkoutStore {
 
     @discardableResult
     public func updateSet(exerciseID: UUID, setID: UUID, reps: Int, weightKG: Double) -> Bool {
-        guard (1...1_000).contains(reps), weightKG.isFinite, (0...1_500).contains(weightKG),
+        guard !isReadOnly, (1...1_000).contains(reps), weightKG.isFinite, (0...1_500).contains(weightKG),
               let indexes = setIndexes(exerciseID: exerciseID, setID: setID) else { return false }
         activeSession!.exercises[indexes.exercise].sets[indexes.set].reps = reps
         activeSession!.exercises[indexes.exercise].sets[indexes.set].weightKG = weightKG
@@ -99,7 +156,7 @@ public final class WorkoutStore {
 
     @discardableResult
     public func toggleSet(exerciseID: UUID, setID: UUID) -> Bool {
-        guard let indexes = setIndexes(exerciseID: exerciseID, setID: setID) else { return false }
+        guard !isReadOnly, let indexes = setIndexes(exerciseID: exerciseID, setID: setID) else { return false }
         activeSession!.exercises[indexes.exercise].sets[indexes.set].isComplete.toggle()
         save()
         return true
@@ -107,7 +164,7 @@ public final class WorkoutStore {
 
     @discardableResult
     public func addSet(exerciseID: UUID) -> Bool {
-        guard let index = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
+        guard !isReadOnly, let index = activeSession?.exercises.firstIndex(where: { $0.id == exerciseID }),
               activeSession!.exercises[index].sets.count < 20 else { return false }
         let lastSet = activeSession!.exercises[index].sets.last
         activeSession!.exercises[index].sets.append(WorkoutSet(reps: lastSet?.reps ?? 10, weightKG: lastSet?.weightKG ?? 0))
@@ -117,7 +174,7 @@ public final class WorkoutStore {
 
     @discardableResult
     public func removeSet(exerciseID: UUID, setID: UUID) -> Bool {
-        guard let indexes = setIndexes(exerciseID: exerciseID, setID: setID),
+        guard !isReadOnly, let indexes = setIndexes(exerciseID: exerciseID, setID: setID),
               activeSession!.exercises[indexes.exercise].sets.count > 1 else { return false }
         activeSession!.exercises[indexes.exercise].sets.remove(at: indexes.set)
         save()
@@ -126,119 +183,336 @@ public final class WorkoutStore {
 
     @discardableResult
     public func finishWorkout() -> WorkoutSession? {
-        guard var session = activeSession, session.completedSets > 0 else { return nil }
+        guard !isReadOnly, var session = activeSession, session.completedSets > 0, Self.validDate(now()) else { return nil }
         session.finishedAt = max(session.startedAt, now())
-        sessions.insert(session, at: 0)
-        activeSession = nil
-        restEndsAt = nil
-        save()
-        return session
+        var snapshot = currentSnapshot
+        snapshot.sessions.insert(session, at: 0)
+        snapshot.activeSession = nil
+        snapshot.restEndsAt = nil
+        return persist(snapshot) ? session : nil
     }
 
-    public func discardWorkout() {
-        activeSession = nil
-        restEndsAt = nil
-        save()
+    @discardableResult
+    public func discardWorkout() -> Bool {
+        guard !isReadOnly else { return false }
+        var snapshot = currentSnapshot
+        snapshot.activeSession = nil
+        snapshot.restEndsAt = nil
+        return persist(snapshot)
+    }
+
+    @discardableResult
+    public func deleteSession(id: UUID) -> Bool {
+        guard !isReadOnly, sessions.contains(where: { $0.id == id }) else { return false }
+        var snapshot = currentSnapshot
+        snapshot.sessions.removeAll { $0.id == id }
+        return persist(snapshot)
     }
 
     @discardableResult
     public func beginRest(seconds: Int) -> Bool {
-        guard activeSession != nil, (0...3_600).contains(seconds) else { return false }
+        guard !isReadOnly, activeSession != nil, (0...3_600).contains(seconds), Self.validDate(now()) else { return false }
         restEndsAt = seconds == 0 ? nil : now().addingTimeInterval(TimeInterval(seconds))
         save()
         return true
     }
 
     public func clearRest() {
+        guard !isReadOnly else { return }
         restEndsAt = nil
         save()
     }
 
     @discardableResult
     public func addWeight(kilograms: Double, date: Date = Date()) -> Bool {
-        guard kilograms.isFinite, kilograms > 0, kilograms <= 1_000, date.timeIntervalSinceReferenceDate.isFinite else { return false }
-        weights.append(WeightEntry(date: date, kilograms: kilograms))
-        weights.sort { $0.date > $1.date }
-        save()
-        return true
+        guard !isReadOnly, kilograms.isFinite, kilograms > 0, kilograms <= 1_000, Self.validDate(date) else { return false }
+        var snapshot = currentSnapshot
+        snapshot.weights.append(WeightEntry(date: date, kilograms: kilograms))
+        return persist(snapshot)
     }
 
     @discardableResult
     public func deleteWeight(id: UUID) -> Bool {
-        guard weights.contains(where: { $0.id == id }) else { return false }
-        weights.removeAll { $0.id == id }
-        save()
-        return true
+        guard !isReadOnly, weights.contains(where: { $0.id == id }) else { return false }
+        var snapshot = currentSnapshot
+        snapshot.weights.removeAll { $0.id == id }
+        return persist(snapshot)
     }
 
     public func setUnit(_ unit: WeightUnit) {
-        self.unit = unit
-        save()
+        guard !isReadOnly else { return }
+        var snapshot = currentSnapshot
+        snapshot.unit = unit
+        _ = persist(snapshot)
     }
 
     @discardableResult
     public func setWeeklyGoal(_ goal: Int) -> Bool {
-        guard (1...7).contains(goal) else { return false }
-        weeklyGoal = goal
-        save()
-        return true
+        guard !isReadOnly, (1...7).contains(goal) else { return false }
+        var snapshot = currentSnapshot
+        snapshot.weeklyGoal = goal
+        return persist(snapshot)
     }
 
     @discardableResult
     public func save() -> Bool {
         guard canWrite else { return false }
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            let snapshot = Snapshot(schemaVersion: 1, routines: routines, sessions: sessions, weights: weights,
-                                    activeSession: activeSession, restEndsAt: restEndsAt, unit: unit, weeklyGoal: weeklyGoal)
-            let data = try encoder.encode(snapshot)
-            try data.write(to: fileURL, options: .atomic)
+            try write(currentSnapshot)
+            hasUnsavedChanges = false
             persistenceError = recoveryNotice
             return true
         } catch {
+            hasUnsavedChanges = true
             persistenceError = "Pep couldn't save your changes. Your current progress is still open. \(error.localizedDescription)"
             return false
         }
     }
 
+    /// Exports the current progress, including unsaved active sets after a disk
+    /// failure, so a user can keep a copy outside the app.
+    public func exportBackup() throws -> Data {
+        guard !isReadOnly else { throw WorkoutBackupError.readOnly }
+        let snapshot = try validatedSnapshot(currentSnapshot)
+        return try encoded(snapshot)
+    }
+
+    /// Exports the exact preserved bytes without validating, importing, or
+    /// changing either file. If several copies exist, uses the most recently
+    /// modified one, with the filename as a deterministic tie-breaker.
+    public func exportRecoveryCopy() throws -> Data {
+        guard let recoveryFileURL else { throw WorkoutBackupError.noRecoveryCopy }
+        let properties = try recoveryFileURL.resourceValues(forKeys: [.isRegularFileKey])
+        guard properties.isRegularFile == true else { throw CocoaError(.fileReadUnknown) }
+        let handle = try FileHandle(forReadingFrom: recoveryFileURL)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: Self.maxBackupBytes + 1) ?? Data()
+        guard data.count <= Self.maxBackupBytes else { throw WorkoutBackupError.tooLarge }
+        return data
+    }
+
+    /// Validates without mutating data. Show this summary before confirming a restore.
+    public func backupSummary(_ data: Data) throws -> WorkoutBackupSummary {
+        let snapshot = try decodeSnapshot(data)
+        return WorkoutBackupSummary(routineCount: snapshot.routines.count,
+                                    sessionCount: snapshot.sessions.count,
+                                    weightCount: snapshot.weights.count,
+                                    hasActiveWorkout: snapshot.activeSession != nil)
+    }
+
+    /// Replaces data only after validation and an atomic disk write both succeed.
+    /// Restoring an active workout from the backup is allowed; overwriting one
+    /// currently open on this device is not.
+    public func restoreBackup(_ data: Data) throws {
+        guard !isReadOnly else { throw WorkoutBackupError.readOnly }
+        guard activeSession == nil else { throw WorkoutBackupError.activeWorkoutInProgress }
+        let snapshot = try decodeSnapshot(data)
+        try write(snapshot)
+        apply(snapshot)
+        hasUnsavedChanges = false
+        persistenceError = recoveryNotice
+    }
+
+    private var currentSnapshot: Snapshot {
+        Snapshot(schemaVersion: 1, routines: routines, sessions: sessions, weights: weights,
+                 activeSession: activeSession, restEndsAt: restEndsAt, unit: unit, weeklyGoal: weeklyGoal)
+    }
+
+    private func encoded(_ snapshot: Snapshot) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
+        guard data.count <= Self.maxBackupBytes else { throw WorkoutBackupError.tooLarge }
+        return data
+    }
+
+    private func write(_ snapshot: Snapshot) throws {
+        let data = try encoded(snapshot)
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: fileURL, options: .atomic)
+    }
+
+    private func persist(_ snapshot: Snapshot) -> Bool {
+        guard !isReadOnly else { return false }
+        do {
+            try write(snapshot)
+            apply(snapshot)
+            hasUnsavedChanges = false
+            persistenceError = recoveryNotice
+            return true
+        } catch {
+            persistenceError = "Pep couldn't save this change. Your previous data and current workout are unchanged. \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func apply(_ snapshot: Snapshot) {
+        routines = snapshot.routines
+        sessions = snapshot.sessions.sorted { ($0.finishedAt ?? $0.startedAt) > ($1.finishedAt ?? $1.startedAt) }
+        weights = snapshot.weights.sorted { $0.date > $1.date }
+        activeSession = snapshot.activeSession
+        restEndsAt = snapshot.restEndsAt
+        unit = snapshot.unit
+        weeklyGoal = snapshot.weeklyGoal
+    }
+
     private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+        discoverRecoveryCopy()
+        let data: Data
+        do {
+            let properties = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard properties.isRegularFile == true else { throw CocoaError(.fileReadUnknown) }
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
+            data = try handle.read(upToCount: Self.maxBackupBytes + 1) ?? Data()
+        } catch let error as NSError where Self.isMissingFile(error) {
             routines = Self.starterRoutines
             save()
             return
+        } catch {
+            // Read failures can be temporary (for example, device data protection).
+            // A file that cannot be read is not evidence of corrupt contents.
+            canWrite = false
+            persistenceError = "Pep can't access your saved data right now. Your original file is unchanged. Reopen Pep when the file is available."
+            return
         }
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let snapshot = try decoder.decode(Snapshot.self, from: Data(contentsOf: fileURL))
-            guard snapshot.schemaVersion == 1 else {
-                // A newer version is left untouched so an older app cannot erase it.
-                canWrite = false
-                persistenceError = "This Pep data was created by a newer app version. Update the app to open it. Your saved file is unchanged."
-                return
-            }
-            routines = snapshot.routines
-            sessions = snapshot.sessions.sorted { ($0.finishedAt ?? $0.startedAt) > ($1.finishedAt ?? $1.startedAt) }
-            weights = snapshot.weights.sorted { $0.date > $1.date }
-            activeSession = snapshot.activeSession
-            restEndsAt = snapshot.restEndsAt
-            unit = snapshot.unit
-            weeklyGoal = (1...7).contains(snapshot.weeklyGoal) ? snapshot.weeklyGoal : 3
+            apply(try decodeSnapshot(data))
+            persistenceError = recoveryNotice
+        } catch WorkoutBackupError.unsupportedVersion {
+            canWrite = false
+            persistenceError = "This Pep data uses a different app version. Update to a newer Pep version to open it. Your saved file is unchanged."
+        } catch WorkoutBackupError.tooLarge {
+            canWrite = false
+            persistenceError = "Your saved data is too large for this Pep version to open safely. Your original file is unchanged."
         } catch {
             routines = Self.starterRoutines
             let backup = fileURL.deletingPathExtension().appendingPathExtension("recovered-\(UUID().uuidString).json")
             do {
                 try FileManager.default.moveItem(at: fileURL, to: backup)
-                recoveryNotice = "Pep couldn't read your saved data. A backup was kept as \(backup.lastPathComponent). You can start fresh, and the backup will stay safe."
+                rememberRecoveryCopy(backup)
+                discoverRecoveryCopy()
                 persistenceError = recoveryNotice
             } catch {
                 canWrite = false
                 persistenceError = "Pep couldn't read or back up your saved data. Your original file is unchanged. New changes cannot be saved until the file is accessible."
             }
         }
+    }
+
+    private func discoverRecoveryCopy() {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: fileURL.deletingLastPathComponent(),
+                                                                       includingPropertiesForKeys: keys) else { return }
+        let prefix = fileURL.deletingPathExtension().lastPathComponent + ".recovered-"
+        let candidates = files.compactMap { url -> (url: URL, modified: Date)? in
+            guard url.pathExtension == "json", url.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(url.deletingPathExtension().lastPathComponent.dropFirst(prefix.count))) != nil,
+                  let properties = try? url.resourceValues(forKeys: Set(keys)),
+                  properties.isRegularFile == true else { return nil }
+            return (url, properties.contentModificationDate ?? .distantPast)
+        }
+        if let latest = candidates.max(by: { left, right in
+            if left.modified == right.modified { return left.url.lastPathComponent < right.url.lastPathComponent }
+            return left.modified < right.modified
+        }) {
+            rememberRecoveryCopy(latest.url)
+        }
+    }
+
+    private func rememberRecoveryCopy(_ url: URL) {
+        recoveryFileURL = url
+        recoveryNotice = "A recovery backup was kept as \(url.lastPathComponent). Export the preserved file from Settings > Back up & restore. It may need repair; your current log stays separate."
+    }
+
+    private func decodeSnapshot(_ data: Data) throws -> Snapshot {
+        guard data.count <= Self.maxBackupBytes else { throw WorkoutBackupError.tooLarge }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            // Read the version independently: future versions may replace every
+            // other field, and must never enter corrupt-file recovery.
+            let header = try decoder.decode(SnapshotHeader.self, from: data)
+            guard header.schemaVersion == 1 else { throw WorkoutBackupError.unsupportedVersion }
+            return try validatedSnapshot(decoder.decode(Snapshot.self, from: data))
+        } catch let error as WorkoutBackupError {
+            throw error
+        } catch {
+            throw WorkoutBackupError.invalidData
+        }
+    }
+
+    private func validatedSnapshot(_ snapshot: Snapshot) throws -> Snapshot {
+        guard (1...7).contains(snapshot.weeklyGoal),
+              Self.uniqueIDs(snapshot.routines), Self.uniqueIDs(snapshot.sessions), Self.uniqueIDs(snapshot.weights) else {
+            throw WorkoutBackupError.invalidData
+        }
+        var snapshot = snapshot
+        for index in snapshot.routines.indices {
+            guard let routine = validatedRoutine(snapshot.routines[index]) else { throw WorkoutBackupError.invalidData }
+            snapshot.routines[index] = routine
+        }
+        for session in snapshot.sessions {
+            guard validSession(session, isActive: false) else { throw WorkoutBackupError.invalidData }
+        }
+        if let active = snapshot.activeSession {
+            guard validSession(active, isActive: true), !snapshot.sessions.contains(where: { $0.id == active.id }) else {
+                throw WorkoutBackupError.invalidData
+            }
+        }
+        if let rest = snapshot.restEndsAt {
+            guard snapshot.activeSession != nil, Self.validDate(rest) else { throw WorkoutBackupError.invalidData }
+        }
+        for weight in snapshot.weights {
+            guard Self.validDate(weight.date), weight.kilograms.isFinite, weight.kilograms > 0, weight.kilograms <= 1_000 else {
+                throw WorkoutBackupError.invalidData
+            }
+        }
+        return snapshot
+    }
+
+    private func validSession(_ session: WorkoutSession, isActive: Bool) -> Bool {
+        guard !session.routineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              session.routineName.count <= 80, Self.validDate(session.startedAt),
+              (1...40).contains(session.exercises.count), Self.uniqueIDs(session.exercises),
+              Self.uniqueIDs(session.exercises.flatMap(\.sets)) else { return false }
+        if isActive {
+            guard session.finishedAt == nil else { return false }
+        } else {
+            guard let finish = session.finishedAt, Self.validDate(finish), finish >= session.startedAt else { return false }
+        }
+        for exercise in session.exercises {
+            guard !exercise.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  exercise.name.count <= 100, (0...3_600).contains(exercise.restSeconds),
+                  (1...20).contains(exercise.sets.count), Self.uniqueIDs(exercise.sets) else { return false }
+            for set in exercise.sets {
+                guard (1...1_000).contains(set.reps), set.weightKG.isFinite, (0...1_500).contains(set.weightKG) else { return false }
+            }
+        }
+        return isActive || session.completedSets > 0
+    }
+
+    private static func uniqueIDs<T: Identifiable>(_ values: [T]) -> Bool where T.ID: Hashable {
+        Set(values.map(\.id)).count == values.count
+    }
+
+    private static func validDate(_ date: Date) -> Bool {
+        let seconds = date.timeIntervalSince1970
+        // A bounded Gregorian range keeps Foundation calendars and UI formatters
+        // safe while allowing old imports and a device clock set in the future.
+        return seconds.isFinite && (-62_135_596_800...253_402_300_799).contains(seconds)
+    }
+
+    private static func isMissingFile(_ error: NSError) -> Bool {
+        if error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError { return true }
+        // ENOENT and ENOTDIR prove that no saved file exists at this path. Other
+        // IO errors (especially access denied) must preserve read-only state.
+        if error.domain == NSPOSIXErrorDomain && [2, 20].contains(error.code) { return true }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isMissingFile(underlying)
+        }
+        return false
     }
 
     private func setIndexes(exerciseID: UUID, setID: UUID) -> (exercise: Int, set: Int)? {
@@ -258,12 +532,14 @@ public final class WorkoutStore {
         var routine = routine
         routine.name = routine.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !routine.name.isEmpty, routine.name.count <= 80,
+              routine.subtitle.count <= 200, routine.symbol.count <= 100,
               !routine.exercises.isEmpty, routine.exercises.count <= 40,
               Set(routine.exercises.map(\.id)).count == routine.exercises.count else { return nil }
         for index in routine.exercises.indices {
             routine.exercises[index].name = routine.exercises[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
             let exercise = routine.exercises[index]
             guard !exercise.name.isEmpty, exercise.name.count <= 100,
+                  exercise.category.count <= 100,
                   (1...20).contains(exercise.sets), (1...1_000).contains(exercise.reps),
                   (0...3_600).contains(exercise.restSeconds) else { return nil }
         }
@@ -285,5 +561,9 @@ public final class WorkoutStore {
         var restEndsAt: Date?
         var unit: WeightUnit
         var weeklyGoal: Int
+    }
+
+    private struct SnapshotHeader: Decodable {
+        var schemaVersion: Int
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     var store: WorkoutStore
     @Environment(\.dismiss) private var dismiss
+    @State private var showBackup = false
 
     var body: some View {
         NavigationStack {
@@ -10,6 +11,10 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     RCHeader(title: "Make it yours.", subtitle: "A little more you. A little more Pep.")
                     RCThemePicker()
+                    if let error = store.persistenceError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(RCTheme.text)
+                    }
                     VStack(alignment: .leading, spacing: 16) {
                         FlowFieldLabel(title: "WEIGHT UNIT")
                         HStack(spacing: 12) {
@@ -22,7 +27,8 @@ struct SettingsView: View {
                                         .foregroundStyle(store.unit == unit ? RCTheme.onAccent : RCTheme.muted)
                                         .background(store.unit == unit ? RCTheme.accent : RCTheme.card, in: RoundedRectangle(cornerRadius: 20))
                                         .overlay(RoundedRectangle(cornerRadius: 20).stroke(store.unit == unit ? Color.clear : RCTheme.border, lineWidth: 1))
-                                }.buttonStyle(RCPressStyle()).accessibilityAddTraits(store.unit == unit ? .isSelected : [])
+                                }.buttonStyle(RCPressStyle()).disabled(store.isReadOnly).accessibilityAddTraits(store.unit == unit ? .isSelected : [])
+                                    .accessibilityIdentifier("settings.unit.\(unit.symbol)")
                             }
                         }
                         Text("Applies to your workout weights and body weight. Your existing entries convert automatically.")
@@ -42,6 +48,15 @@ struct SettingsView: View {
                         Text("Pick a rhythm that fits your life. Rest days count as taking care of yourself, too.")
                             .font(.system(size: 12)).foregroundStyle(RCTheme.muted)
                     }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        FlowFieldLabel(title: "YOUR LOG, TO GO")
+                        Text("A little peace of mind.").font(.system(.title3, design: .rounded, weight: .bold))
+                        Text("Save a backup to Files and bring it with you to a new device. You choose where it goes.")
+                            .font(.system(.subheadline, design: .rounded)).foregroundStyle(RCTheme.muted)
+                        RCSecondaryButton(title: "Back up & restore", icon: "externaldrive") { showBackup = true }
+                            .accessibilityIdentifier("settings.backup")
+                    }.rcSurface()
 
                     VStack(alignment: .leading, spacing: 18) {
                         FlowFieldLabel(title: "GOOD THINGS, NO CATCH")
@@ -63,6 +78,7 @@ struct SettingsView: View {
             .foregroundStyle(RCTheme.text).background(RCTheme.background.ignoresSafeArea()).preferredColorScheme(RCAppearance.shared.colorScheme)
             .navigationTitle("Settings").navigationBarTitleDisplayModeIfAvailable()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(RCTheme.accentText) } }
+            .sheet(isPresented: $showBackup) { BackupView(store: store) }
         }
     }
 
@@ -71,7 +87,7 @@ struct SettingsView: View {
             Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(width: 48, height: 48)
                 .foregroundStyle(RCTheme.accentText).background(RCTheme.background, in: Circle())
                 .overlay(Circle().stroke(RCTheme.border, lineWidth: 1))
-        }.buttonStyle(RCPressStyle()).disabled(disabled).opacity(disabled ? 0.3 : 1)
+        }.buttonStyle(RCPressStyle()).disabled(disabled || store.isReadOnly).opacity(disabled || store.isReadOnly ? 0.3 : 1)
             .accessibilityLabel(symbol == "plus" ? "Increase weekly workout goal" : "Decrease weekly workout goal")
     }
 

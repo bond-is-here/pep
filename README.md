@@ -18,11 +18,12 @@ The buddy adds a small wobble and blink. Press responses, animated set checkmark
 
 ## What works
 
-- **Today:** your current week, adjustable weekly workout goal, one-tap start, resume an interrupted session, and optional weight check-in.
+- **Today:** a routine suggestion that rotates from your completed history, an instant routine chooser, your current week, one-tap start, resume an interrupted session, and optional weight check-in.
 - **Routines:** three editable starter routines, a searchable library of 30 exercises, custom exercises, exercise reordering, and configurable sets, repetitions, and rest periods.
 - **Workouts:** editable weights and repetitions, completed-set tracking, add/remove sets, elapsed time, a rest timer, and a completion recap. Previously completed weights carry into the next session of the same routine.
-- **Progress:** completed sessions, total training volume, weekly activity, body-weight trends, individual session details, and weight history with confirmed deletion.
-- **Settings:** kilograms/pounds and a weekly goal of one to seven sessions.
+- **Progress:** completed sessions, total training volume, weekly activity, body-weight trends, individual session details, and confirmed deletion of workouts and weight check-ins.
+- **Little wins:** lifetime workout milestones, from your first session to the high-five club and beyond. Milestones count real saved workouts, with no streak to lose.
+- **Settings:** kilograms/pounds, a weekly goal of one to seven sessions, and backup/restore through Files.
 
 Workout volume counts completed sets only. Starter routines are supplied; workout history and body weights start empty.
 
@@ -43,11 +44,19 @@ Appearance preferences live separately in `RepComet/appearance.json`, so changin
 
 The source folder retains its original `RepComet` path, and the app retains bundle identifier `app.repcomet.ios`. Its project, display name, build product, and shared Xcode scheme are **Pep**. Keeping the identifier and storage paths preserves compatibility with existing installations.
 
-Unreadable data is preserved in a recovery backup. Data from a newer schema is left untouched. Save failures appear in the interface. The app does not make network requests or synchronize data between devices.
+Corrupt data is preserved in a recovery backup, with a notice that survives relaunch. Settings → Back up & restore → Save recovery copy exports the most recent untouched file for possible repair; all originals stay on the device. Inaccessible files and data from a newer schema are left untouched. Backups are validated before loading; failed imports leave the current log intact. Finishing or discarding a workout, editing a routine, and adding or deleting history require a successful disk write. Failed active-set saves keep the current edits open with a visible retry action.
+
+Choose **Settings → Back up & restore → Save to Files** to export your routines, sessions, weights, preferences, and active workout. Choose **Choose a backup** to review the counts and explicitly replace your log. Finish or discard a current workout before restoring. Backups are limited to 20 MB and contain personal workout/weight information; keep them somewhere you trust. Appearance preferences stay on the device. The app has no automatic network requests or cloud synchronization; any cloud location used in Files is chosen by you.
 
 ## Verification
 
-Run the Foundation/Observation model tests:
+Run project validation, native source typechecking, and the Foundation/Observation regression tests:
+
+```sh
+bash Tools/check.sh
+```
+
+Run just the model tests on a configured Xcode installation:
 
 ```sh
 swift test
@@ -59,9 +68,9 @@ On the development Mac, an optional runner uses the installed Command Line Tools
 Tests/run-core-tests.sh --command-line-tools
 ```
 
-The 14 tests cover persistence round trips, active workout and timer restoration, completed-only volume, historical snapshots, previous set weights, validation, unit conversions, week boundaries, corrupt-data recovery, newer-schema protection, and write errors.
+The regression tests cover persistence, active workout and timer restoration, completed-only volume, historical snapshots, routine identity and rotation, milestones, localized numeric entry and weight precision, validation, unit conversions, week boundaries, corrupt-data recovery, future-schema protection, backup/restore transactions, and write failures.
 
-The development workflow also typechecks native sources against the iOS 17 SDK, compiles an unsigned ARM64 executable, and renders SwiftUI screens for visual inspection. On this Mac, Xcode's license and simulator setup remain incomplete, so an Xcode-managed simulator or physical-device run has not been performed. Generated project metadata is checked with `plutil`; the icon is a 1024 × 1024 opaque PNG.
+The shared Pep scheme includes a native XCUITest target. GitHub Actions runs it on an available iPhone simulator, as well as the core checks and an unsigned iPhone Release build. UI tests use a separate DEBUG-only data directory and preserve it within each relaunch test. The local Mac's Xcode license and simulator setup remain incomplete, so local iOS runtime testing requires finishing that setup. Native macOS renders are useful for layout inspection, but are not iPhone runtime tests or App Store screenshots. The separate HTML prototype used in early design is not a test of the shipped SwiftUI app.
 
 ## Project structure
 

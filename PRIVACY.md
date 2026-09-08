@@ -18,8 +18,27 @@ calculate training volume, and show progress:
 
 The app saves these records in an atomic JSON file under the app's Application
 Support directory. It has no developer-operated workout server and no cloud
-sync feature. Your routines, workouts, and weight entries are not uploaded by
-the app. Device backups are a separate matter controlled by Apple.
+sync feature. Pep does not automatically upload your routines, workouts, or
+weight entries. Device backups are a separate matter controlled by Apple.
+
+## Backups you choose to create
+
+Settings includes a backup export and restore feature. An exported JSON file
+contains your routines, workout history, optional body weights, units, weekly
+goal, and any current workout. It does not include appearance preferences.
+You choose where to save it using the system Files picker. If you choose iCloud
+Drive or another cloud provider, that provider handles the copy under its own
+terms and privacy policy. Pep does not receive it. Keep exported files private.
+
+When saved data cannot be read, Pep preserves the original file locally. You can
+export the most recent recovery copy from Settings without changing its contents.
+Pep reads modification dates of its own recovery files only to select that copy;
+these dates stay on the device. The privacy manifest declares this app-container
+file metadata use under Apple's required reason `C617.1`.
+
+Restoring a backup requires selecting a file and confirming replacement of the
+current log. Deleting records or uninstalling Pep does not delete exported
+copies; manage those separately in Files or the storage provider you selected.
 
 Pep does not read from or write to Apple Health or HealthKit. Its locally saved
 workout and body-weight information is app data, not an Apple Health database.
@@ -37,8 +56,11 @@ medical information, credentials, or screenshots containing private details.
 ## Retention and deletion
 
 Pep keeps local records until you change or remove them. You can delete an
-individual weight check-in from Progress and delete routines from the routine
-editor; completed workout history remains available unless you delete the app.
+individual weight check-in from Progress, a saved workout from its recap, and
+routines from the routine editor. Deleting a routine preserves its saved workout
+history. Deleting a workout updates your progress and milestone counts.
+Individual deletions affect the current log; preserved recovery copies remain
+until the app is deleted. Exported copies must be managed separately.
 
 To remove all Pep data stored in the current iPhone app container:
 
