@@ -93,6 +93,14 @@ jobs:
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/PepUITests.xcresult" \
             CODE_SIGNING_ALLOWED=NO
+      - name: Summarize native UI results
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/PepUITests.xcresult" ]; then
+            python3 Tools/summarize_ui_results.py "$RUNNER_TEMP/PepUITests.xcresult" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Native UI result bundle unavailable; inspect the build and test steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload native UI results and screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
