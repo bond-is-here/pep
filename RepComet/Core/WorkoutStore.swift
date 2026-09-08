@@ -43,7 +43,9 @@ public final class WorkoutStore {
     /// Mutation methods return whether the input was accepted. Disk failures are reported in persistenceError.
     @discardableResult
     public func addRoutine(_ routine: Routine) -> Bool {
-        guard let routine = validatedRoutine(routine), !routines.contains(where: { $0.id == routine.id }) else { return false }
+        guard let routine = validatedRoutine(routine),
+              !routines.contains(where: { $0.id == routine.id }),
+              !hasRoutineNameConflict(routine) else { return false }
         routines.append(routine)
         save()
         return true
@@ -51,7 +53,9 @@ public final class WorkoutStore {
 
     @discardableResult
     public func updateRoutine(_ routine: Routine) -> Bool {
-        guard let routine = validatedRoutine(routine), let index = routines.firstIndex(where: { $0.id == routine.id }) else { return false }
+        guard let routine = validatedRoutine(routine),
+              let index = routines.firstIndex(where: { $0.id == routine.id }),
+              !hasRoutineNameConflict(routine, excluding: routine.id) else { return false }
         routines[index] = routine
         save()
         return true
@@ -68,8 +72,11 @@ public final class WorkoutStore {
     @discardableResult
     public func startWorkout(_ routine: Routine) -> Bool {
         guard activeSession == nil, let routine = validatedRoutine(routine) else { return false }
-        let previous = sessions.first { $0.routineName == routine.name }
-        activeSession = WorkoutSession(routineName: routine.name, startedAt: now(), exercises: routine.exercises.map { exercise in
+        let previous = sessions.first { session in
+            if let routineID = session.routineID { return routineID == routine.id }
+            return session.routineName.caseInsensitiveCompare(routine.name) == .orderedSame
+        }
+        activeSession = WorkoutSession(routineID: routine.id, routineName: routine.name, startedAt: now(), exercises: routine.exercises.map { exercise in
             let previousExercise = previous?.exercises.first { $0.name == exercise.name }
             return SessionExercise(name: exercise.name, sets: (0..<exercise.sets).map { setIndex in
                 let previousSet = previousExercise?.sets.indices.contains(setIndex) == true ? previousExercise?.sets[setIndex] : nil
@@ -239,6 +246,12 @@ public final class WorkoutStore {
               let exercise = session.exercises.firstIndex(where: { $0.id == exerciseID }),
               let set = session.exercises[exercise].sets.firstIndex(where: { $0.id == setID }) else { return nil }
         return (exercise, set)
+    }
+
+    private func hasRoutineNameConflict(_ routine: Routine, excluding id: UUID? = nil) -> Bool {
+        routines.contains { existing in
+            existing.id != id && existing.name.caseInsensitiveCompare(routine.name) == .orderedSame
+        }
     }
 
     private func validatedRoutine(_ routine: Routine) -> Routine? {

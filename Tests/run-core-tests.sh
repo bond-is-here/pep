@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # A configured Xcode installation only needs the standard Swift package command.
-if [[ "${1:-}" != "--command-line-tools" ]]; then
+if [[ "${1:-}" != "--command-line-tools" ]] && /usr/bin/xcrun --find swift >/dev/null 2>&1; then
     exec swift test
 fi
 

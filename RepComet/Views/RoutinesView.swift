@@ -44,7 +44,12 @@ struct RoutinesView: View {
     }
 
     private func routineCard(_ routine: Routine, index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
+        let activeRoutine = store.activeSession.map { active in
+            if let routineID = active.routineID { return routineID == routine.id }
+            return active.routineName.caseInsensitiveCompare(routine.name) == .orderedSame
+        } ?? false
+        let workoutInProgress = store.activeSession != nil
+        return VStack(alignment: .leading, spacing: 15) {
             HStack(spacing: 9) {
                 Text(String(format: "%02d", index + 1))
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
@@ -84,15 +89,21 @@ struct RoutinesView: View {
                 }.buttonStyle(RCPressStyle())
                 Button {
                     RCTheme.impact()
-                    if store.activeSession == nil { _ = store.startWorkout(routine) }
+                    if store.activeSession == nil {
+                        _ = store.startWorkout(routine)
+                    }
                     showWorkout = store.activeSession != nil
                 } label: {
                     HStack(spacing: 10) {
-                        Text(store.activeSession == nil ? "Let's go" : "Resume")
-                        Image(systemName: "arrow.right")
+                        Text(workoutInProgress ? (activeRoutine ? "Resume" : "Finish current") : "Let's go")
+                        Image(systemName: workoutInProgress && !activeRoutine ? "lock.fill" : "arrow.right")
                     }.font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(RCTheme.onAccent)
                         .frame(maxWidth: .infinity).frame(minHeight: 46).background(RCTheme.accent, in: RoundedRectangle(cornerRadius: 15))
-                }.buttonStyle(RCPressStyle()).accessibilityLabel(store.activeSession == nil ? "Start \(routine.name)" : "Resume active workout")
+                }
+                .buttonStyle(RCPressStyle())
+                .disabled(workoutInProgress && !activeRoutine)
+                .opacity(workoutInProgress && !activeRoutine ? 0.55 : 1)
+                .accessibilityLabel(workoutInProgress ? (activeRoutine ? "Resume active \(routine.name) workout" : "Finish the active workout before starting \(routine.name)") : "Start \(routine.name)")
             }
         }.padding(18)
             .background(index % 2 == 0 ? RCTheme.heroStart.opacity(0.72) : RCTheme.secondary.opacity(0.09), in: RoundedRectangle(cornerRadius: 27, style: .continuous))

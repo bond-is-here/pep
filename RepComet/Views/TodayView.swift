@@ -46,9 +46,12 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()).uppercased())
                 .font(.system(size: 9, weight: .bold, design: .rounded)).tracking(1.4).foregroundStyle(RCTheme.muted)
-            (Text("A little pep.\n").foregroundColor(RCTheme.text) + Text("A stronger you.").foregroundColor(RCTheme.accentText))
-                .font(.system(size: 35, weight: .heavy, design: .rounded)).tracking(-1.5)
-                .lineSpacing(-1).fixedSize(horizontal: false, vertical: true).minimumScaleFactor(0.75)
+            VStack(alignment: .leading, spacing: -1) {
+                Text("A little pep.").foregroundStyle(RCTheme.text)
+                Text("A stronger you.").foregroundStyle(RCTheme.accentText)
+            }
+            .font(.system(size: 35, weight: .heavy, design: .rounded)).tracking(-1.5)
+            .fixedSize(horizontal: false, vertical: true).minimumScaleFactor(0.75)
         }
     }
 

@@ -78,13 +78,16 @@ public struct SessionExercise: Codable, Identifiable, Hashable, Sendable {
 
 public struct WorkoutSession: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
+    /// Optional for compatibility with sessions saved before Pep tracked routine identity.
+    public var routineID: UUID?
     public var routineName: String
     public var startedAt: Date
     public var finishedAt: Date?
     public var exercises: [SessionExercise]
 
-    public init(id: UUID = UUID(), routineName: String, startedAt: Date = Date(), finishedAt: Date? = nil, exercises: [SessionExercise]) {
+    public init(id: UUID = UUID(), routineID: UUID? = nil, routineName: String, startedAt: Date = Date(), finishedAt: Date? = nil, exercises: [SessionExercise]) {
         self.id = id
+        self.routineID = routineID
         self.routineName = routineName
         self.startedAt = startedAt
         self.finishedAt = finishedAt

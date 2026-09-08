@@ -122,6 +122,40 @@ final class WorkoutStoreTests: XCTestCase {
         XCTAssertEqual(store.activeSession?.volumeKG, 0)
     }
 
+    func testRenamedRoutineKeepsItsPreviousWeightsAndDuplicateNamesAreRejected() throws {
+        let store = WorkoutStore(fileURL: fileURL)
+        var routine = makeRoutine()
+        XCTAssertTrue(store.addRoutine(routine))
+        XCTAssertFalse(store.addRoutine(Routine(name: "  MY SESSION  ", exercises: makeRoutine().exercises)))
+        XCTAssertTrue(store.startWorkout(routine))
+        let exercise = try XCTUnwrap(store.activeSession?.exercises.first)
+        XCTAssertTrue(store.updateSet(exerciseID: exercise.id, setID: exercise.sets[0].id, reps: 8, weightKG: 32.5))
+        XCTAssertTrue(store.toggleSet(exerciseID: exercise.id, setID: exercise.sets[0].id))
+        XCTAssertNotNil(store.finishWorkout())
+
+        routine.name = "A new name"
+        XCTAssertTrue(store.updateRoutine(routine))
+        XCTAssertTrue(store.startWorkout(routine))
+        XCTAssertEqual(store.activeSession?.routineID, routine.id)
+        XCTAssertEqual(store.activeSession?.exercises[0].sets[0].weightKG, 32.5)
+        XCTAssertEqual(store.activeSession?.completedSets, 0)
+    }
+
+    func testOlderSnapshotsWithoutRoutineIdentityStillOpen() throws {
+        let store = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(store.startWorkout(store.routines[0]))
+        var snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+        var active = try XCTUnwrap(snapshot["activeSession"] as? [String: Any])
+        active.removeValue(forKey: "routineID")
+        snapshot["activeSession"] = active
+        try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]).write(to: fileURL)
+
+        let restored = WorkoutStore(fileURL: fileURL)
+        XCTAssertNil(restored.persistenceError)
+        XCTAssertNil(restored.activeSession?.routineID)
+        XCTAssertEqual(restored.activeSession?.routineName, store.routines[0].name)
+    }
+
     func testSetValidationAndAddRemoveRespectBounds() throws {
         let store = WorkoutStore(fileURL: fileURL)
         XCTAssertTrue(store.startWorkout(makeRoutine(sets: 1)))
