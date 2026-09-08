@@ -2,7 +2,7 @@ name: Pep checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   pull_request:
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   verify:
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,7 +27,49 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
       - name: Run Pep checks
         run: bash Tools/check.sh
-      - name: Build for iPhone Simulator
-        run: xcodebuild -project Pep.xcodeproj -scheme Pep -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Verify generated project is current
+        run: |
+          python3 Tools/generate_project.py
+          git diff --exit-code -- Pep.xcodeproj
+      - name: Select an available iPhone Simulator
+        id: simulator
+        run: |
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/pep-simulators.json"
+          python3 - <<'PY'
+          import json, os, re
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "pep-simulators.json")) as source:
+              devices = json.load(source)["devices"]
+          candidates = []
+          for runtime, group in devices.items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in re.findall(r"\d+", runtime.rsplit("iOS-", 1)[1]))
+              for device in group:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      candidates.append((version, device["name"], device["udid"]))
+          if not candidates:
+              raise SystemExit("No available iPhone Simulator. Install an iOS runtime on this runner.")
+          _, name, identifier = sorted(candidates, reverse=True)[0]
+          print(f"Testing native Pep UI on {name}: {identifier}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"id={identifier}\n")
+          PY
+      - name: Run native iOS UI tests
+        env:
+          PEP_SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          xcodebuild test -project Pep.xcodeproj -scheme Pep -configuration Debug \
+            -destination "platform=iOS Simulator,id=$PEP_SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/PepUITests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
       - name: Build release for iPhone (unsigned)
         run: xcodebuild -project Pep.xcodeproj -scheme Pep -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Upload native UI results and screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Pep-native-UI-results
+          path: ${{ runner.temp }}/PepUITests.xcresult
+          if-no-files-found: warn
+          retention-days: 7

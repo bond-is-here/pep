@@ -6,6 +6,7 @@ struct WeightHistoryView: View {
     @State private var showWeightEntry = false
     @State private var showDeleteConfirmation = false
     @State private var selectedEntry: WeightEntry?
+    @State private var deleteError: String?
 
     private var entries: [WeightEntry] { store.weights.sorted { $0.date > $1.date } }
 
@@ -25,6 +26,8 @@ struct WeightHistoryView: View {
                         }
                     }
                     RCSecondaryButton(title: "Add a check-in", icon: "plus") { showWeightEntry = true }
+                        .disabled(store.isReadOnly)
+                    if let deleteError { Text(deleteError).font(.callout).foregroundStyle(RCTheme.text) }
                 }.padding(22).padding(.bottom, 20)
             }
             .foregroundStyle(RCTheme.text).background(RCTheme.background.ignoresSafeArea()).preferredColorScheme(RCAppearance.shared.colorScheme)
@@ -36,7 +39,9 @@ struct WeightHistoryView: View {
             }
             .sheet(isPresented: $showWeightEntry) { WeightEntryView(store: store) }
             .confirmationDialog("Delete this check-in?", isPresented: $showDeleteConfirmation, titleVisibility: .visible, presenting: selectedEntry) { entry in
-                Button("Delete check-in", role: .destructive) { _ = store.deleteWeight(id: entry.id) }
+                Button("Delete check-in", role: .destructive) {
+                    deleteError = store.deleteWeight(id: entry.id) ? nil : store.persistenceError ?? "Couldn't delete this check-in. Please try again."
+                }
                 Button("Keep check-in", role: .cancel) {}
             } message: { entry in
                 Text("Your \(FlowFormat.number(store.unit.value(fromKilograms: entry.kilograms))) \(store.unit.symbol) check-in from \(entry.date.formatted(date: .abbreviated, time: .omitted)) will be permanently removed.")
@@ -60,7 +65,7 @@ struct WeightHistoryView: View {
                 Image(systemName: "trash").font(.system(size: 16, weight: .medium))
                     .foregroundStyle(RCTheme.muted).frame(width: 44, height: 44)
                     .background(RCTheme.background, in: Circle())
-            }.buttonStyle(RCPressStyle())
+            }.buttonStyle(RCPressStyle()).disabled(store.isReadOnly)
                 .accessibilityLabel("Delete \(FlowFormat.number(store.unit.value(fromKilograms: entry.kilograms))) \(store.unit.symbol) check-in from \(entry.date.formatted(date: .abbreviated, time: .omitted))")
         }.rcSurface(padding: 18)
     }

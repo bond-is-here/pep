@@ -69,7 +69,11 @@ struct RCPalette {
 
 @Observable
 final class RCAppearance {
+    #if DEBUG
+    static let shared = RCAppearance(fileURL: PepUITestLaunch.appearanceFileURL)
+    #else
     static let shared = RCAppearance()
+    #endif
 
     var selected: RCColorway { didSet { persist() } }
     var motionEnabled: Bool { didSet { persist() } }

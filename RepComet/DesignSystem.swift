@@ -75,8 +75,8 @@ struct RCHeader: View {
     var subtitle: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(title).font(.system(size: 36, weight: .heavy, design: .rounded)).tracking(-1.2).foregroundStyle(RCTheme.text)
-            if let subtitle { Text(subtitle).font(.system(size: 14)).foregroundStyle(RCTheme.muted).lineSpacing(4) }
+            Text(title).font(.system(.largeTitle, design: .rounded, weight: .heavy)).tracking(-1.2).foregroundStyle(RCTheme.text)
+            if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(RCTheme.muted).lineSpacing(4) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -88,7 +88,7 @@ struct RCPrimaryButton: View {
     var body: some View {
         Button { RCTheme.impact(); action() } label: {
             HStack(spacing: 12) {
-                Text(title).font(.system(size: 16, weight: .bold, design: .rounded))
+                Text(title).font(.system(.headline, design: .rounded))
                 Spacer(minLength: 8)
                 if let icon { Image(systemName: icon).font(.system(size: 16, weight: .bold, design: .rounded)) }
             }.foregroundStyle(RCTheme.onAccent).padding(.horizontal, 22).frame(minHeight: 56)
@@ -106,7 +106,7 @@ struct RCSecondaryButton: View {
             HStack(spacing: 10) {
                 if let icon { Image(systemName: icon) }
                 Text(title)
-            }.font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(RCTheme.text)
+            }.font(.system(.headline, design: .rounded)).foregroundStyle(RCTheme.text)
                 .frame(maxWidth: .infinity).frame(minHeight: 50)
                 .background(RCTheme.border.opacity(0.65), in: RoundedRectangle(cornerRadius: 15))
         }.buttonStyle(RCPressStyle())
@@ -130,15 +130,15 @@ struct RCEmptyState: View {
     var body: some View {
         VStack(spacing: 14) {
             RCSymbolBadge(symbol: symbol)
-            Text(title).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(RCTheme.text)
-            Text(message).font(.system(size: 14)).foregroundStyle(RCTheme.muted)
+            Text(title).font(.system(.headline, design: .rounded)).foregroundStyle(RCTheme.text)
+            Text(message).font(.subheadline).foregroundStyle(RCTheme.muted)
                 .multilineTextAlignment(.center).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
         }.padding(.vertical, 22).padding(.horizontal, 16).frame(maxWidth: .infinity)
     }
 }
 
 struct PepBuddy: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     private var moving: Bool { !reduceMotion && RCAppearance.shared.motionEnabled && scenePhase == .active }
@@ -221,7 +221,7 @@ struct RCFieldStyle: ViewModifier {
 }
 
 struct RCPressStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion && RCAppearance.shared.motionEnabled ? 0.97 : 1)
@@ -232,7 +232,7 @@ struct RCPressStyle: ButtonStyle {
 
 struct RCEntrance: ViewModifier {
     let delay: Double
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
     @State private var appeared = false
     private var animated: Bool { !reduceMotion && RCAppearance.shared.motionEnabled }
 
@@ -250,7 +250,7 @@ extension View {
 }
 
 struct RCCompletionMark: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
     @State private var appeared = false
     private var animated: Bool { !reduceMotion && RCAppearance.shared.motionEnabled }
 

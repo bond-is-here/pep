@@ -19,7 +19,7 @@ struct ContentView: View {
     @State private var selectedTab: MainTab = .today
     @State private var showSettings = false
     @Namespace private var tabHighlight
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
     private var motion: Bool { !reduceMotion && RCAppearance.shared.motionEnabled }
 
     var body: some View {
@@ -42,6 +42,7 @@ struct ContentView: View {
                                 .background(RCTheme.card, in: Circle())
                                 .overlay(Circle().stroke(RCTheme.border, lineWidth: 1))
                         }.buttonStyle(RCPressStyle()).accessibilityLabel("Settings and appearance")
+                            .accessibilityIdentifier("settings.open")
                     }.padding(.horizontal, 22).padding(.top, 6).padding(.bottom, 12)
                     Group {
                         switch selectedTab {
@@ -77,9 +78,9 @@ struct ContentView: View {
                     VStack(spacing: 6) {
                         Image(systemName: tab.symbol).font(.system(size: 19, weight: selected ? .semibold : .regular))
                             .frame(height: 22)
-                        Text(tab.rawValue).font(.system(size: 11, weight: selected ? .bold : .medium, design: .rounded))
+                        Text(tab.rawValue).font(.system(.caption, design: .rounded, weight: selected ? .bold : .medium))
                     }.foregroundStyle(selected ? RCTheme.accentText : RCTheme.muted)
-                        .frame(maxWidth: .infinity).frame(height: 57)
+                        .frame(maxWidth: .infinity).frame(minHeight: 57).padding(.vertical, 4)
                         .background {
                             if selected {
                                 RoundedRectangle(cornerRadius: 19).fill(RCTheme.accent.opacity(0.11))
@@ -87,6 +88,7 @@ struct ContentView: View {
                             }
                         }
                 }.buttonStyle(RCPressStyle()).accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("navigation.\(tab.rawValue.lowercased())")
             }
         }.padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 6)
             .background(RCTheme.card)

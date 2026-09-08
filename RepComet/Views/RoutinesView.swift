@@ -15,6 +15,15 @@ struct RoutinesView: View {
                     Text("A plan for your kind of strong.")
                         .font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(RCTheme.muted)
                 }.rcEntrance(delay: 0.02)
+                if let active = store.activeSession {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Still in your corner").font(.system(.headline, design: .rounded))
+                        Text("\(active.routineName) · \(active.completedSets) sets saved so far")
+                            .font(.system(.subheadline, design: .rounded)).foregroundStyle(RCTheme.muted)
+                        RCPrimaryButton(title: "Resume workout", icon: "arrow.right") { showWorkout = true }
+                            .accessibilityIdentifier("routines.resume-workout")
+                    }.rcSurface()
+                }
                 HStack {
                     Text("YOUR ROUTINES").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.4).foregroundStyle(RCTheme.muted)
                     Spacer()
@@ -31,6 +40,7 @@ struct RoutinesView: View {
                     }
                 }
                 RCPrimaryButton(title: "Make a new routine", icon: "plus") { showCreateRoutine = true }
+                    .disabled(store.isReadOnly)
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "sparkle").foregroundStyle(RCTheme.accentText)
                     Text("Start with one of ours, or do your own thing. Every move, every routine. Always free.")
@@ -101,7 +111,7 @@ struct RoutinesView: View {
                         .frame(maxWidth: .infinity).frame(minHeight: 46).background(RCTheme.accent, in: RoundedRectangle(cornerRadius: 15))
                 }
                 .buttonStyle(RCPressStyle())
-                .disabled(workoutInProgress && !activeRoutine)
+                .disabled(store.isReadOnly || (workoutInProgress && !activeRoutine))
                 .opacity(workoutInProgress && !activeRoutine ? 0.55 : 1)
                 .accessibilityLabel(workoutInProgress ? (activeRoutine ? "Resume active \(routine.name) workout" : "Finish the active workout before starting \(routine.name)") : "Start \(routine.name)")
             }

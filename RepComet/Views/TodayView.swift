@@ -5,6 +5,12 @@ struct TodayView: View {
     var openRoutines: () -> Void
     @State private var showWorkout = false
     @State private var showWeightEntry = false
+    @State private var chosenRoutineID: UUID?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var nextRoutine: Routine? {
+        store.routines.first(where: { $0.id == chosenRoutineID }) ?? store.suggestedRoutine
+    }
 
     private var weekDays: [Date] {
         let calendar = Calendar.current
@@ -20,7 +26,7 @@ struct TodayView: View {
                 Group {
                     if let active = store.activeSession {
                         activeCard(active)
-                    } else if let routine = store.routines.first {
+                    } else if let routine = nextRoutine {
                         nextWorkoutCard(routine)
                     } else {
                         VStack(alignment: .leading, spacing: 12) {
@@ -30,6 +36,7 @@ struct TodayView: View {
                     }
                 }.rcEntrance(delay: 0.07)
                 weeklyGoal.rcEntrance(delay: 0.12)
+                MomentumCard(momentum: store.momentum).rcEntrance(delay: 0.14)
                 weightCheckIn.rcEntrance(delay: 0.17)
                 HStack(spacing: 6) {
                     Image(systemName: "heart.fill").font(.system(size: 10))
@@ -40,6 +47,7 @@ struct TodayView: View {
         }
         .rcWorkoutPresentation(isPresented: $showWorkout) { WorkoutView(store: store) }
         .sheet(isPresented: $showWeightEntry) { WeightEntryView(store: store) }
+        .onChange(of: store.sessions.count) { _, _ in chosenRoutineID = nil }
     }
 
     private var greeting: some View {
@@ -50,7 +58,7 @@ struct TodayView: View {
                 Text("A little pep.").foregroundStyle(RCTheme.text)
                 Text("A stronger you.").foregroundStyle(RCTheme.accentText)
             }
-            .font(.system(size: 35, weight: .heavy, design: .rounded)).tracking(-1.5)
+            .font(.system(.largeTitle, design: .rounded, weight: .heavy)).tracking(-1.5)
             .fixedSize(horizontal: false, vertical: true).minimumScaleFactor(0.75)
         }
     }
@@ -64,19 +72,37 @@ struct TodayView: View {
                         Text("UP NEXT").font(.system(size: 9, weight: .heavy, design: .rounded)).tracking(1)
                     }.foregroundStyle(RCTheme.accentText)
                     Text(displayName(routine.name))
-                        .font(.system(size: 34, weight: .heavy, design: .rounded)).tracking(-1.2)
+                        .font(.system(.largeTitle, design: .rounded, weight: .heavy)).tracking(-1.2)
                         .lineSpacing(-2).foregroundStyle(RCTheme.text)
                         .fixedSize(horizontal: false, vertical: true).minimumScaleFactor(0.75)
                     Text("\(routine.estimatedMinutes) min  ·  \(routine.exercises.count) exercises")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(RCTheme.text.opacity(0.74)).fixedSize(horizontal: true, vertical: false)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(RCTheme.text.opacity(0.74)).fixedSize(horizontal: false, vertical: true)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                PepBuddy().frame(width: 135, height: 145).padding(.trailing, -3)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    PepBuddy().frame(width: 105, height: 120).padding(.trailing, -3)
+                }
+            }
+            if chosenRoutineID == nil, !store.sessions.isEmpty {
+                Text(store.lastCompletedDate(for: routine) == nil ? "A fresh one to try. Your choice, always." : "Rotated from your log. Go at your own pace.")
+                    .font(.system(.caption, design: .rounded)).foregroundStyle(RCTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             RCPrimaryButton(title: "Start workout", icon: "arrow.right") {
                 _ = store.startWorkout(routine)
                 showWorkout = store.activeSession != nil
-            }
+            }.accessibilityIdentifier("today.start-workout").disabled(store.isReadOnly)
+            Menu {
+                ForEach(store.routines) { alternative in
+                    Button(alternative.name) { chosenRoutineID = alternative.id }
+                }
+                Divider()
+                Button("Edit my routines", action: openRoutines)
+            } label: {
+                Label("Choose a different routine", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(RCTheme.accentText).frame(maxWidth: .infinity, minHeight: 44)
+            }.accessibilityIdentifier("today.choose-routine")
         }
         .padding(18)
         .background(LinearGradient(colors: [RCTheme.heroStart, RCTheme.heroStart, RCTheme.heroEnd.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 29, style: .continuous))
@@ -94,9 +120,10 @@ struct TodayView: View {
                     Text("\(session.completedSets) sets down. Keep it going!")
                         .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(RCTheme.muted)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                PepBuddy().frame(width: 106, height: 120)
+                if !dynamicTypeSize.isAccessibilitySize { PepBuddy().frame(width: 106, height: 120) }
             }
             RCPrimaryButton(title: "Resume workout", icon: "arrow.right") { showWorkout = true }
+                .accessibilityIdentifier("today.resume-workout")
         }.padding(18)
             .background(RCTheme.heroStart, in: RoundedRectangle(cornerRadius: 29, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 29, style: .continuous).stroke(RCTheme.accent.opacity(0.1), lineWidth: 1))

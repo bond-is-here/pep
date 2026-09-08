@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RCThemePicker: View {
     @Bindable private var appearance = RCAppearance.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pepReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -17,6 +17,7 @@ struct RCThemePicker: View {
                     paletteCard(colorway)
                 }.buttonStyle(RCPressStyle())
                     .accessibilityLabel("\(colorway.title). \(colorway.subtitle)")
+                    .accessibilityIdentifier("appearance.theme.\(colorway.rawValue)")
                     .accessibilityAddTraits(appearance.selected == colorway ? .isSelected : [])
             }
             Toggle(isOn: $appearance.motionEnabled) {
@@ -25,6 +26,12 @@ struct RCThemePicker: View {
                     Text("A wiggly buddy. A happy little high-five.").font(.system(size: 12, design: .rounded)).foregroundStyle(RCTheme.muted)
                 }
             }.toggleStyle(.switch).tint(RCTheme.accent).padding(.top, 7)
+                .accessibilityIdentifier("appearance.motion")
+            if reduceMotion {
+                Text("Your device’s Reduce Motion setting keeps Pep still.")
+                    .font(.caption).foregroundStyle(RCTheme.muted)
+                    .accessibilityIdentifier("appearance.reduce-motion")
+            }
             if let message = appearance.saveError {
                 Text(message).font(.caption).foregroundStyle(RCTheme.accentText)
             }

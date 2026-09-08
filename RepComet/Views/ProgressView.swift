@@ -20,6 +20,7 @@ struct ProgressScreenView: View {
                     metric(value: volumeString, title: "\(store.unit.symbol.uppercased()) LIFTED", symbol: "dumbbell")
                 }
                 weeklyActivity
+                MomentumCard(momentum: store.momentum)
                 weightProgress
                 history
                 Text("Your pace. Your progress. Plenty to feel good about.")
@@ -30,7 +31,7 @@ struct ProgressScreenView: View {
         .sheet(isPresented: $showWeightHistory) { WeightHistoryView(store: store) }
         .sheet(item: $selectedSession) { session in
             NavigationStack {
-                SessionDetailView(session: session, unit: store.unit)
+                SessionDetailView(session: session, unit: store.unit, store: store)
                     .toolbar { ToolbarItem(placement: .automatic) { Button("Done") { selectedSession = nil }.tint(RCTheme.accentText) } }
             }.preferredColorScheme(RCAppearance.shared.colorScheme)
         }
@@ -41,7 +42,7 @@ struct ProgressScreenView: View {
                     ScrollView {
                         VStack(spacing: 12) {
                             ForEach(recentSessions) { session in
-                                NavigationLink { SessionDetailView(session: session, unit: store.unit) } label: { sessionRow(session) }
+                                NavigationLink { SessionDetailView(session: session, unit: store.unit, store: store) } label: { sessionRow(session) }
                                     .buttonStyle(RCPressStyle())
                             }
                         }.padding(24)

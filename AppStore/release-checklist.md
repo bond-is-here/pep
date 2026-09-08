@@ -8,9 +8,10 @@ no signing, upload, purchase, or submission is performed by this repository.
 
 - [x] Native SwiftUI iPhone app, Pep icon, privacy manifest, and shared scheme.
 - [x] Core persistence and workout behavior checks.
-- [x] GitHub Actions workflow for simulator Debug and unsigned iPhone Release builds.
+- [x] GitHub Actions workflow for native simulator UI tests and unsigned iPhone Release builds.
 - [x] Public MIT license, privacy policy, and support instructions.
 - [ ] Run a signed Release archive with the correct development team.
+- [ ] Confirm the final commit passes native simulator tests and review the attached screenshots.
 - [ ] Test the signed build on supported iPhone sizes, VoiceOver, larger text, and Reduce Motion.
 
 ## App Store preparation

@@ -53,12 +53,12 @@ struct WeightEntryView: View {
                     if let error { Text(error).font(.system(size: 13)).foregroundStyle(.orange) }
                     RCPrimaryButton(title: "Save check-in", icon: "checkmark") {
                         guard let kilograms = validKilograms, store.addWeight(kilograms: kilograms, date: date) else {
-                            error = "Enter a valid weight above zero."
+                            error = store.persistenceError ?? "Enter a valid weight above zero."
                             return
                         }
                         weightFocused = false
                         dismiss()
-                    }.disabled(validKilograms == nil).opacity(validKilograms == nil ? 0.45 : 1)
+                    }.disabled(validKilograms == nil || store.isReadOnly).opacity(validKilograms == nil || store.isReadOnly ? 0.45 : 1)
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "heart").foregroundStyle(RCTheme.accentText)
                         Text("Weight naturally changes from day to day. Your trend tells you more than a single check-in.")
