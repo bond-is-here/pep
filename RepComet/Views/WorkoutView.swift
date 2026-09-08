@@ -252,6 +252,7 @@ private struct WorkoutSetRow: View {
     @State private var repsText: String
     @State private var showingError = false
     @State private var draftDirty = false
+    @State private var pendingSave: Task<Void, Never>?
     @Environment(\.pepReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var useAccessibleLayout: Bool { dynamicTypeSize.isAccessibilitySize }
@@ -306,12 +307,14 @@ private struct WorkoutSetRow: View {
         .onChange(of: store.unit) { _, newUnit in weightDraft = WorkoutWeightDraft(kilograms: set.weightKG, unit: newUnit) }
         .onChange(of: focusedInput.wrappedValue) { old, new in
             if (old == .weight(set.id) || old == .reps(set.id)), new != .weight(set.id), new != .reps(set.id) {
+                pendingSave?.cancel()
                 showingError = !persistIfValid()
             }
         }
         .onDisappear {
             // A toolbar dismissal can race the focus change transaction. Commit
             // a valid draft once more so minimizing never drops the last edit.
+            pendingSave?.cancel()
             if !showingError { _ = persistIfValid() }
         }
     }
@@ -324,6 +327,7 @@ private struct WorkoutSetRow: View {
             .onChange(of: weightDraft.text) { _, _ in
                 draftDirty = true
                 showingError = !persistIfValid(persist: false)
+                if showingError { pendingSave?.cancel() } else { scheduleDraftSave() }
             }
             .modifier(FlowNumberField())
     }
@@ -336,12 +340,14 @@ private struct WorkoutSetRow: View {
             .onChange(of: repsText) { _, _ in
                 draftDirty = true
                 showingError = !persistIfValid(persist: false)
+                if showingError { pendingSave?.cancel() } else { scheduleDraftSave() }
             }
             .modifier(FlowNumberField())
     }
 
     private var completionButton: some View {
         Button {
+            pendingSave?.cancel()
             guard persistIfValid() else { showingError = true; return }
             focusedInput.wrappedValue = nil
             let wasComplete = store.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == set.id })?.isComplete ?? set.isComplete
@@ -417,6 +423,16 @@ private struct WorkoutSetRow: View {
         onValidation(set.id, true)
         showingError = false
         return true
+    }
+
+    private func scheduleDraftSave() {
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 650_000_000) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            _ = persistIfValid()
+        }
     }
 }
 
