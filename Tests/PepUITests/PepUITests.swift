@@ -224,9 +224,8 @@ final class PepUITests: XCTestCase {
 
         // iOS 26's Save UI exposes a non-actionable accessibility node labelled
         // "Cancel" and has no user-visible dismissal control in its hierarchy.
-        // Let this test case end with the picker presented; XCTest tears down
-        // the host app before the separate open-picker case starts.
-        app.terminate()
+        // Leave the system controller presented; XCTest tears down the host app
+        // between cases without sending a termination event through Files.
     }
 
     func testBackupPresentsNativeOpenPicker() {
@@ -236,7 +235,6 @@ final class PepUITests: XCTestCase {
         tap(app.buttons["backup.import"], in: app)
         assertNativeDocumentPicker(in: app, covering: app.buttons["backup.import"])
         capture("Native backup open picker")
-        app.terminate()
     }
 
     private func launchApp(reduceMotion: Bool = false, largeText: Bool = false, locale: String = "en_US") -> XCUIApplication {
