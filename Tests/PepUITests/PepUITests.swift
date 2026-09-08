@@ -222,16 +222,16 @@ final class PepUITests: XCTestCase {
         tap(app.buttons["backup.export"], in: app)
         assertNativeDocumentPicker(in: app, covering: app.buttons["backup.export"])
         capture("Native backup save picker")
-        app.navigationBars.buttons["Cancel"].firstMatch.tap()
+        cancelNativeDocumentPicker(in: app)
         XCTAssertTrue(app.buttons["backup.export"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars.buttons["Cancel"].firstMatch.exists)
+        XCTAssertFalse(nativePickerCancelButton(in: app).exists)
 
         tap(app.buttons["backup.import"], in: app)
         assertNativeDocumentPicker(in: app, covering: app.buttons["backup.import"])
         capture("Native backup open picker")
-        app.navigationBars.buttons["Cancel"].firstMatch.tap()
+        cancelNativeDocumentPicker(in: app)
         XCTAssertTrue(app.buttons["backup.import"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars.buttons["Cancel"].firstMatch.exists)
+        XCTAssertFalse(nativePickerCancelButton(in: app).exists)
         reveal(app.buttons["backup.import"], in: app)
         XCTAssertTrue(app.buttons["backup.import"].isEnabled)
         XCTAssertFalse(app.staticTexts["backup.status"].exists, "Cancelling either picker must return without reporting a save or restore.")
@@ -257,15 +257,31 @@ final class PepUITests: XCTestCase {
     }
 
     private func assertNativeDocumentPicker(in app: XCUIApplication, covering sourceButton: XCUIElement) {
-        // The system Files picker remembers its last location. Require both its
-        // navigation action and a Files-specific landmark; Pep's Backup view
-        // contains neither, and its own button alone cannot satisfy this check.
-        XCTAssertTrue(app.navigationBars.buttons["Cancel"].firstMatch.waitForExistence(timeout: 10))
+        // The system Files picker remembers its last location. Require a
+        // Files-specific landmark and its system cancellation control; Pep's
+        // Backup view contains neither, and its own button alone cannot satisfy
+        // this check. On iOS 26 the picker exposes Cancel as an Other element
+        // rather than a navigation-bar button, so query the accessibility tree
+        // by its label instead of assuming a UIKit container.
         let browserLandmark = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label IN %@", ["Browse", "Recents", "Locations", "On My iPhone", "iCloud Drive"]
+            format: "identifier IN %@ OR label IN %@",
+            ["Browse View (Picker)", "DOCPicker.filenameTextField"],
+            ["Browse", "Recents", "Locations", "On My iPhone", "On My iPhone is Empty", "iCloud Drive", "Save as"]
         )).firstMatch
-        XCTAssertTrue(browserLandmark.waitForExistence(timeout: 5), "The native Files browser must be presented.")
+        XCTAssertTrue(browserLandmark.waitForExistence(timeout: 10), "The native Files browser must be presented.")
+        XCTAssertTrue(nativePickerCancelButton(in: app).waitForExistence(timeout: 5), "The native Files picker must expose a cancellation control.")
         XCTAssertFalse(sourceButton.exists && sourceButton.isHittable, "The native picker must cover Pep's backup action.")
+    }
+
+    private func nativePickerCancelButton(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Cancel")).firstMatch
+    }
+
+    private func cancelNativeDocumentPicker(in app: XCUIApplication) {
+        let cancel = nativePickerCancelButton(in: app)
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "The native Files picker must expose a cancellation control.")
+        XCTAssertTrue(cancel.isHittable, "The native Files cancellation control must be tappable.")
+        cancel.tap()
     }
 
     private func enter(_ text: String, into field: XCUIElement) {
