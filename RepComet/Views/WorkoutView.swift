@@ -14,6 +14,7 @@ private struct WorkoutNotice: Identifiable {
 struct WorkoutView: View {
     var store: WorkoutStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingDiscard = false
     @State private var showingFinish = false
     @State private var completedSession: WorkoutSession?
@@ -63,6 +64,13 @@ struct WorkoutView: View {
                 #endif
             }
             .interactiveDismissDisabled(!invalidSetIDs.isEmpty)
+            .onChange(of: scenePhase) { _, phase in
+                guard phase != .active, store.activeSession != nil else { return }
+                // Persist the last valid in-memory draft before iOS suspends
+                // the scene. Invalid text stays local to its field and cannot
+                // corrupt the saved workout.
+                _ = store.save()
+            }
             .alert(item: $notice) { item in
                 Alert(title: Text(item.title), message: Text(item.message), dismissButton: .default(Text("Keep editing")))
             }
@@ -243,6 +251,7 @@ private struct WorkoutSetRow: View {
     @State private var weightDraft: WorkoutWeightDraft
     @State private var repsText: String
     @State private var showingError = false
+    @State private var draftDirty = false
     @Environment(\.pepReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var useAccessibleLayout: Bool { dynamicTypeSize.isAccessibilitySize }
@@ -300,6 +309,11 @@ private struct WorkoutSetRow: View {
                 showingError = !persistIfValid()
             }
         }
+        .onDisappear {
+            // A toolbar dismissal can race the focus change transaction. Commit
+            // a valid draft once more so minimizing never drops the last edit.
+            if !showingError { _ = persistIfValid() }
+        }
     }
 
     private var weightField: some View {
@@ -307,7 +321,10 @@ private struct WorkoutSetRow: View {
             .flowDecimalKeyboard().focused(focusedInput, equals: .weight(set.id))
             .accessibilityLabel("Set \(number) weight in \(store.unit.symbol)")
             .accessibilityIdentifier("workout.set.weight.\(exerciseIndex).\(number - 1)")
-            .onChange(of: weightDraft.text) { _, _ in showingError = !persistIfValid() }
+            .onChange(of: weightDraft.text) { _, _ in
+                draftDirty = true
+                showingError = !persistIfValid(persist: false)
+            }
             .modifier(FlowNumberField())
     }
 
@@ -316,7 +333,10 @@ private struct WorkoutSetRow: View {
             .flowIntegerKeyboard().focused(focusedInput, equals: .reps(set.id))
             .accessibilityLabel("Set \(number) repetitions")
             .accessibilityIdentifier("workout.set.reps.\(exerciseIndex).\(number - 1)")
-            .onChange(of: repsText) { _, _ in showingError = !persistIfValid() }
+            .onChange(of: repsText) { _, _ in
+                draftDirty = true
+                showingError = !persistIfValid(persist: false)
+            }
             .modifier(FlowNumberField())
     }
 
@@ -368,7 +388,7 @@ private struct WorkoutSetRow: View {
             .accessibilityIdentifier("workout.set.remove.\(exerciseIndex).\(number - 1)")
     }
 
-    @discardableResult private func persistIfValid() -> Bool {
+    @discardableResult private func persistIfValid(persist: Bool = true) -> Bool {
         guard store.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.contains(where: { $0.id == set.id }) == true else {
             onValidation(set.id, true)
             return false
@@ -378,11 +398,22 @@ private struct WorkoutSetRow: View {
             onValidation(set.id, false)
             return false
         }
-        guard store.updateSet(exerciseID: exerciseID, setID: set.id, reps: reps, weightKG: kilograms) else {
+        if let current = store.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == set.id }),
+           current.reps == reps, current.weightKG == kilograms {
+            if persist && draftDirty, store.save() { draftDirty = false }
+            weightDraft.accept(kilograms: kilograms)
+            if !persist { draftDirty = false }
+            onValidation(set.id, true)
+            showingError = false
+            return true
+        }
+        guard store.updateSet(exerciseID: exerciseID, setID: set.id, reps: reps, weightKG: kilograms, persist: false) else {
             onValidation(set.id, false)
             return false
         }
+        if persist, store.save() { draftDirty = false }
         weightDraft.accept(kilograms: kilograms)
+        if !persist { draftDirty = true }
         onValidation(set.id, true)
         showingError = false
         return true

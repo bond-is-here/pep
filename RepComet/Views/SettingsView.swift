@@ -5,6 +5,16 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showBackup = false
 
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        switch (version?.isEmpty == false ? version : nil, build?.isEmpty == false ? build : nil) {
+        case let (version?, build?): return "Version \(version) (\(build))"
+        case let (version?, nil): return "Version \(version)"
+        default: return "Development build"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -71,7 +81,7 @@ struct SettingsView: View {
                     VStack(spacing: 7) {
                         Text("Pep").font(.system(size: 32, weight: .heavy, design: .rounded))
                         Text("A little effort. A lot to feel good about.").font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(RCTheme.muted)
-                        Text("Version 1.0").font(.system(size: 11)).foregroundStyle(RCTheme.muted).padding(.top, 5)
+                        Text(appVersion).font(.system(size: 11)).foregroundStyle(RCTheme.muted).padding(.top, 5)
                     }.frame(maxWidth: .infinity).padding(.vertical, 12)
                 }.padding(22)
             }

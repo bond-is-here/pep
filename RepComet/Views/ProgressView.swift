@@ -81,8 +81,8 @@ struct ProgressScreenView: View {
             }
             HStack(alignment: .bottom, spacing: 12) {
                 ForEach(currentWeek, id: \.self) { day in
-                    let count = store.sessions.filter { Calendar.current.isDate($0.finishedAt ?? $0.startedAt, inSameDayAs: day) }.count
-                    let today = Calendar.current.isDateInToday(day)
+                    let count = store.completedSessionCount(on: day)
+                    let today = store.isToday(day)
                     VStack(spacing: 10) {
                         ZStack(alignment: .bottom) {
                             RoundedRectangle(cornerRadius: 6).fill(RCTheme.background).frame(height: 80)
@@ -106,14 +106,11 @@ struct ProgressScreenView: View {
     }
 
     private var currentWeek: [Date] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let firstDay = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: firstDay) }
+        store.currentWeekDays
     }
 
     private var maxDailySessions: Int {
-        max(1, currentWeek.map { day in store.sessions.filter { Calendar.current.isDate($0.finishedAt ?? $0.startedAt, inSameDayAs: day) }.count }.max() ?? 1)
+        max(1, currentWeek.map { store.completedSessionCount(on: $0) }.max() ?? 1)
     }
 
     private var weightProgress: some View {

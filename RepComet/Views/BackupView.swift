@@ -96,13 +96,21 @@ struct BackupView: View {
                           defaultFilename: "Pep-\(exportingRecovery ? "recovery-copy" : "backup")-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))") { result in
                 switch result {
                 case .success: report(exportingRecovery ? "Recovery copy saved. Pep has kept the original, too." : "Backup saved.")
-                case .failure(let error): report(error.localizedDescription, error: true)
+                case .failure(let error):
+                    if isUserCancelled(error) { message = nil; isError = false }
+                    else { report(error.localizedDescription, error: true) }
                 }
                 document = nil
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
                 do {
-                    let url = try result.get()
+                    let url: URL
+                    switch result {
+                    case .success(let selectedURL): url = selectedURL
+                    case .failure(let error):
+                        guard !isUserCancelled(error) else { return }
+                        throw error
+                    }
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     let file = try FileHandle(forReadingFrom: url)
@@ -141,5 +149,10 @@ struct BackupView: View {
     private func report(_ text: String, error: Bool = false) {
         message = text
         isError = error
+    }
+
+    private func isUserCancelled(_ error: Error) -> Bool {
+        let cocoaError = error as NSError
+        return cocoaError.domain == NSCocoaErrorDomain && cocoaError.code == NSUserCancelledError
     }
 }

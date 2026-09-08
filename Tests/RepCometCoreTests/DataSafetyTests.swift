@@ -192,6 +192,22 @@ final class DataSafetyTests: XCTestCase {
         XCTAssertThrowsError(try store.restoreBackup(Data("not JSON".utf8)))
     }
 
+    func testRestoreRejectsRestDeadlineFarBeyondTheAllowedTimerWindow() throws {
+        let source = WorkoutStore(fileURL: fileURL, now: { self.fixedDate })
+        XCTAssertTrue(source.startWorkout(source.routines[0]))
+        XCTAssertTrue(source.beginRest(seconds: 120))
+        let farFuture = try changing(source.exportBackup()) { root in
+            root["restEndsAt"] = "9999-12-31T23:59:59Z"
+        }
+        let destinationURL = directory.appendingPathComponent("future-rest.json")
+        let destination = WorkoutStore(fileURL: destinationURL, now: { self.fixedDate })
+        XCTAssertThrowsError(try destination.backupSummary(farFuture)) { error in
+            guard case WorkoutBackupError.invalidData = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertThrowsError(try destination.restoreBackup(farFuture))
+        XCTAssertNil(destination.activeSession)
+    }
+
     func testOversizedBackupIsRejectedWithoutReplacingCurrentData() throws {
         let store = WorkoutStore(fileURL: fileURL)
         let original = try Data(contentsOf: fileURL)
