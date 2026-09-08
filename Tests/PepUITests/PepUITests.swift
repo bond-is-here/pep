@@ -214,29 +214,29 @@ final class PepUITests: XCTestCase {
         capture("Backup protects the active workout")
     }
 
-    func testBackupPresentsNativeSaveAndOpenPickers() {
-        let saveApp = launchApp()
-        tap(saveApp.buttons["settings.open"], in: saveApp)
-        tap(saveApp.buttons["settings.backup"], in: saveApp)
-
-        tap(saveApp.buttons["backup.export"], in: saveApp)
-        assertNativeDocumentPicker(in: saveApp, covering: saveApp.buttons["backup.export"])
+    func testBackupPresentsNativeSavePicker() {
+        let app = launchApp()
+        tap(app.buttons["settings.open"], in: app)
+        tap(app.buttons["settings.backup"], in: app)
+        tap(app.buttons["backup.export"], in: app)
+        assertNativeDocumentPicker(in: app, covering: app.buttons["backup.export"])
         capture("Native backup save picker")
 
         // iOS 26's Save UI exposes a non-actionable accessibility node labelled
         // "Cancel" and has no user-visible dismissal control in its hierarchy.
-        // End this isolated launch after verifying presentation, then exercise
-        // the open flow in a fresh launch rather than pretending that node can
-        // be tapped.
-        saveApp.terminate()
+        // Let this test case end with the picker presented; XCTest tears down
+        // the host app before the separate open-picker case starts.
+        app.terminate()
+    }
 
-        let openApp = launchApp()
-        tap(openApp.buttons["settings.open"], in: openApp)
-        tap(openApp.buttons["settings.backup"], in: openApp)
-        tap(openApp.buttons["backup.import"], in: openApp)
-        assertNativeDocumentPicker(in: openApp, covering: openApp.buttons["backup.import"])
+    func testBackupPresentsNativeOpenPicker() {
+        let app = launchApp()
+        tap(app.buttons["settings.open"], in: app)
+        tap(app.buttons["settings.backup"], in: app)
+        tap(app.buttons["backup.import"], in: app)
+        assertNativeDocumentPicker(in: app, covering: app.buttons["backup.import"])
         capture("Native backup open picker")
-        openApp.terminate()
+        app.terminate()
     }
 
     private func launchApp(reduceMotion: Bool = false, largeText: Bool = false, locale: String = "en_US") -> XCUIApplication {
