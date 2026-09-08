@@ -202,10 +202,13 @@ final class PepUITests: XCTestCase {
         // Right edge puts the insertion point after existing short numeric values.
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         let previous = field.value as? String ?? ""
-        if !previous.isEmpty && previous != field.placeholderValue {
+        // A real default (such as 8 reps) can equal its placeholder. Clear it
+        // either way; delete on an empty field leaves its placeholder intact.
+        if !previous.isEmpty {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count))
         }
         field.typeText(text)
+        XCTAssertEqual(field.value as? String, text, "The field must contain the requested input before testing its behavior.")
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
