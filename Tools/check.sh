@@ -12,8 +12,8 @@ xmllint --noout Pep.xcodeproj/xcshareddata/xcschemes/Pep.xcscheme
 pep_swiftc=(/Library/Developer/CommandLineTools/usr/bin/swiftc)
 pep_target="$(uname -m)-apple-macosx26.0"
 pep_sdk=( -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk )
-if pep_xcode_swiftc="$(/usr/bin/xcrun --find swiftc 2>/dev/null)"; then
-  pep_swiftc=("$pep_xcode_swiftc")
+if /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
+  pep_swiftc=(/usr/bin/xcrun swiftc)
   pep_target="$(uname -m)-apple-macosx14.0"
   pep_sdk=()
 fi
