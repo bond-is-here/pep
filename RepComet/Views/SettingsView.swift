@@ -87,7 +87,7 @@ struct SettingsView: View {
             Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(width: 48, height: 48)
                 .foregroundStyle(RCTheme.accentText).background(RCTheme.background, in: Circle())
                 .overlay(Circle().stroke(RCTheme.border, lineWidth: 1))
-        }.buttonStyle(RCPressStyle()).disabled(disabled).opacity(disabled ? 0.3 : 1)
+        }.buttonStyle(RCPressStyle()).disabled(disabled || store.isReadOnly).opacity(disabled || store.isReadOnly ? 0.3 : 1)
             .accessibilityLabel(symbol == "plus" ? "Increase weekly workout goal" : "Decrease weekly workout goal")
     }
 

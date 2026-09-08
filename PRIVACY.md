@@ -30,6 +30,12 @@ You choose where to save it using the system Files picker. If you choose iCloud
 Drive or another cloud provider, that provider handles the copy under its own
 terms and privacy policy. Pep does not receive it. Keep exported files private.
 
+When saved data cannot be read, Pep preserves the original file locally. You can
+export the most recent recovery copy from Settings without changing its contents.
+Pep reads modification dates of its own recovery files only to select that copy;
+these dates stay on the device. The privacy manifest declares this app-container
+file metadata use under Apple's required reason `C617.1`.
+
 Restoring a backup requires selecting a file and confirming replacement of the
 current log. Deleting records or uninstalling Pep does not delete exported
 copies; manage those separately in Files or the storage provider you selected.

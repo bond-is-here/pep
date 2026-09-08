@@ -124,6 +124,7 @@ struct ProgressScreenView: View {
                     Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).foregroundStyle(RCTheme.accentText)
                         .frame(width: 44, height: 44).background(RCTheme.accent.opacity(0.08), in: Circle())
                 }.buttonStyle(RCPressStyle()).accessibilityLabel("Add weight check-in")
+                    .disabled(store.isReadOnly)
             }
             if let latest = orderedWeights.last {
                 VStack(alignment: .leading, spacing: 7) {

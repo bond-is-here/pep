@@ -54,6 +54,36 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"id={identifier}\n")
           PY
+      - name: Build release for iPhone (unsigned)
+        run: |
+          xcodebuild -project Pep.xcodeproj -scheme Pep -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/PepRelease" CODE_SIGNING_ALLOWED=NO build
+      - name: Verify the built release bundle
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, plistlib
+          app = pathlib.Path(os.environ["RUNNER_TEMP"]) / "PepRelease/Build/Products/Release-iphoneos/Pep.app"
+          with (app / "Info.plist").open("rb") as file:
+              info = plistlib.load(file)
+          assert info["CFBundleDisplayName"] == "Pep"
+          assert info["CFBundleIdentifier"] == "app.repcomet.ios"
+          assert info["MinimumOSVersion"] == "17.0"
+          assert set(info["UIDeviceFamily"]) == {1, 2}
+          assert set(info["UISupportedInterfaceOrientations~ipad"]) == {
+              "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+              "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"
+          }
+          with (app / "PrivacyInfo.xcprivacy").open("rb") as file:
+              privacy = plistlib.load(file)
+          assert privacy["NSPrivacyTracking"] is False
+          assert privacy["NSPrivacyCollectedDataTypes"] == []
+          assert {item["NSPrivacyAccessedAPIType"]: item["NSPrivacyAccessedAPITypeReasons"]
+                  for item in privacy["NSPrivacyAccessedAPITypes"]} == {
+              "NSPrivacyAccessedAPICategoryFileTimestamp": ["C617.1"]
+          }
+          print("Built Pep release metadata, device support, and privacy manifest verified.")
+          PY
       - name: Run native iOS UI tests
         env:
           PEP_SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
@@ -63,8 +93,6 @@ jobs:
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/PepUITests.xcresult" \
             CODE_SIGNING_ALLOWED=NO
-      - name: Build release for iPhone (unsigned)
-        run: xcodebuild -project Pep.xcodeproj -scheme Pep -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
       - name: Upload native UI results and screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

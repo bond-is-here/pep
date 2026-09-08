@@ -188,6 +188,7 @@ struct TodayView: View {
                     .background(RCTheme.secondary.opacity(0.08), in: Circle())
             }.rcSurface(padding: 14)
         }.buttonStyle(RCPressStyle()).accessibilityLabel("Log your body weight, optional")
+            .disabled(store.isReadOnly)
     }
 
     private func displayName(_ name: String) -> String {

@@ -222,6 +222,81 @@ final class DataSafetyTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
+    func testRecoveryCopySurvivesRelaunchAndExportsExactBytesWithoutWriting() throws {
+        let original = Data([0x00, 0xFF, 0x7B, 0x0A, 0x31, 0x0D])
+        try original.write(to: fileURL)
+        let recovered = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(recovered.hasRecoveryCopy)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        let preserved = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+        let namesBeforeExport = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        try denyWrites {
+            XCTAssertEqual(try recovered.exportRecoveryCopy(), original)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "Export must not save a replacement log.")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), namesBeforeExport)
+        }
+
+        // Closing immediately after recovery must not hide the preserved file
+        // just because the primary data file hasn't been recreated yet.
+        let reopened = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(reopened.hasRecoveryCopy)
+        XCTAssertTrue(reopened.persistenceError?.contains("recovery backup") == true)
+        XCTAssertEqual(try reopened.exportRecoveryCopy(), original)
+        let currentLog = try Data(contentsOf: fileURL)
+        let reopenedAgain = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(reopenedAgain.hasRecoveryCopy)
+        XCTAssertNotNil(reopenedAgain.persistenceError)
+        XCTAssertEqual(try reopenedAgain.exportRecoveryCopy(), original)
+        XCTAssertEqual(try Data(contentsOf: fileURL), currentLog)
+        XCTAssertEqual(try Data(contentsOf: preserved), original)
+    }
+
+    func testRecoveryExportSelectsLatestCopyAndNeverReplacesReadOnlyData() throws {
+        let older = directory.appendingPathComponent("workouts.recovered-\(UUID().uuidString).json")
+        let newer = directory.appendingPathComponent("workouts.recovered-\(UUID().uuidString).json")
+        let oldBytes = Data("older broken log".utf8)
+        let newBytes = Data("newer broken log".utf8)
+        try oldBytes.write(to: older)
+        try newBytes.write(to: newer)
+        try FileManager.default.setAttributes([.modificationDate: fixedDate.addingTimeInterval(-60)], ofItemAtPath: older.path)
+        try FileManager.default.setAttributes([.modificationDate: fixedDate], ofItemAtPath: newer.path)
+        let unrelated = directory.appendingPathComponent("workouts.recovered-not-a-generated-copy.json")
+        try Data("unrelated".utf8).write(to: unrelated)
+        let future = Data(#"{"schemaVersion":99,"newShape":true}"#.utf8)
+        try future.write(to: fileURL)
+        let store = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(store.isReadOnly)
+        XCTAssertTrue(store.hasRecoveryCopy)
+        let errorBeforeExport = store.persistenceError
+        try denyWrites {
+            XCTAssertEqual(try store.exportRecoveryCopy(), newBytes)
+            XCTAssertEqual(store.persistenceError, errorBeforeExport)
+            XCTAssertEqual(try Data(contentsOf: fileURL), future)
+            XCTAssertEqual(try Data(contentsOf: older), oldBytes)
+            XCTAssertEqual(try Data(contentsOf: newer), newBytes)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 4)
+    }
+
+    func testRecoveryExportRejectsMissingAndOversizedCopiesWithoutChangingThem() throws {
+        let fresh = WorkoutStore(fileURL: fileURL)
+        XCTAssertFalse(fresh.hasRecoveryCopy)
+        XCTAssertThrowsError(try fresh.exportRecoveryCopy()) { error in
+            guard case WorkoutBackupError.noRecoveryCopy = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        let primary = try Data(contentsOf: fileURL)
+        let preserved = directory.appendingPathComponent("workouts.recovered-\(UUID().uuidString).json")
+        let tooLarge = Data(repeating: 32, count: WorkoutStore.maxBackupBytes + 1)
+        try tooLarge.write(to: preserved)
+        let reopened = WorkoutStore(fileURL: fileURL)
+        XCTAssertTrue(reopened.hasRecoveryCopy)
+        XCTAssertThrowsError(try reopened.exportRecoveryCopy()) { error in
+            guard case WorkoutBackupError.tooLarge = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertEqual(try Data(contentsOf: fileURL), primary)
+        XCTAssertEqual(try Data(contentsOf: preserved), tooLarge)
+    }
+
     func testRestoreDiskFailureLeavesExistingMemoryAndFileUnchanged() throws {
         let store = WorkoutStore(fileURL: fileURL)
         let backup = try store.exportBackup()

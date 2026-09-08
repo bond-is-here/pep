@@ -26,12 +26,32 @@ struct BackupView: View {
     @State private var confirmingRestore = false
     @State private var message: String?
     @State private var isError = false
+    @State private var exportingRecovery = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     RCHeader(title: "Your wins.\nPacked to go.", subtitle: "Keep a copy of everything you've put in.")
+                    if store.isReadOnly, let error = store.persistenceError {
+                        Label(error, systemImage: "lock.shield")
+                            .font(.system(.subheadline, design: .rounded))
+                    }
+                    if store.hasRecoveryCopy {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Label("Your original file is safe", systemImage: "doc.badge.clock")
+                                .font(.system(.title3, design: .rounded, weight: .bold))
+                            Text("Pep kept a file it couldn't read. Save this untouched recovery copy for possible repair. It may need repair before it can be restored. If there are several copies, this saves the most recent one.")
+                                .font(.system(.subheadline, design: .rounded)).foregroundStyle(RCTheme.muted)
+                            RCSecondaryButton(title: "Save recovery copy", icon: "arrow.up.doc") {
+                                do {
+                                    document = PepBackupDocument(data: try store.exportRecoveryCopy())
+                                    exportingRecovery = true
+                                    exporting = true
+                                } catch { report(error.localizedDescription, error: true) }
+                            }.accessibilityIdentifier("backup.export-recovery")
+                        }.rcSurface()
+                    }
                     VStack(alignment: .leading, spacing: 16) {
                         Label("Save a backup", systemImage: "square.and.arrow.up")
                             .font(.system(.title3, design: .rounded, weight: .bold))
@@ -40,9 +60,10 @@ struct BackupView: View {
                         RCPrimaryButton(title: "Save to Files", icon: "arrow.up.doc") {
                             do {
                                 document = PepBackupDocument(data: try store.exportBackup())
+                                exportingRecovery = false
                                 exporting = true
                             } catch { report(error.localizedDescription, error: true) }
-                        }.accessibilityIdentifier("backup.export")
+                        }.disabled(store.isReadOnly).accessibilityIdentifier("backup.export")
                     }.rcSurface()
 
                     VStack(alignment: .leading, spacing: 16) {
@@ -72,9 +93,9 @@ struct BackupView: View {
             .navigationTitle("Backup & restore").navigationBarTitleDisplayModeIfAvailable()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .fileExporter(isPresented: $exporting, document: document, contentType: .json,
-                          defaultFilename: "Pep-backup-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))") { result in
+                          defaultFilename: "Pep-\(exportingRecovery ? "recovery-copy" : "backup")-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))") { result in
                 switch result {
-                case .success: report("Backup saved.")
+                case .success: report(exportingRecovery ? "Recovery copy saved. Pep has kept the original, too." : "Backup saved.")
                 case .failure(let error): report(error.localizedDescription, error: true)
                 }
                 document = nil

@@ -14,6 +14,7 @@ public enum WorkoutBackupError: LocalizedError {
     case activeWorkoutInProgress
     case readOnly
     case tooLarge
+    case noRecoveryCopy
 
     public var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ public enum WorkoutBackupError: LocalizedError {
             return "Pep can't replace saved data while it is unavailable or requires a newer app version. Your saved file is unchanged."
         case .tooLarge:
             return "This backup is too large to open safely. Pep supports backups up to 20 MB. Your current data is unchanged."
+        case .noRecoveryCopy:
+            return "There is no preserved recovery copy to export. Your current data is unchanged."
         }
     }
 }
@@ -45,12 +48,14 @@ public final class WorkoutStore {
     public private(set) var hasUnsavedChanges = false
     /// Incompatible or inaccessible existing data must never be overwritten.
     public var isReadOnly: Bool { !canWrite }
+    public var hasRecoveryCopy: Bool { recoveryFileURL != nil }
 
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private let calendar: Calendar
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var canWrite = true
     @ObservationIgnored private var recoveryNotice: String?
+    @ObservationIgnored private var recoveryFileURL: URL?
 
     /// A file URL and clock can be supplied for isolated stores and deterministic tests.
     public init(fileURL: URL? = nil, calendar: Calendar = .current, now: @escaping () -> Date = Date.init) {
@@ -272,6 +277,20 @@ public final class WorkoutStore {
         return try encoded(snapshot)
     }
 
+    /// Exports the exact preserved bytes without validating, importing, or
+    /// changing either file. If several copies exist, uses the most recently
+    /// modified one, with the filename as a deterministic tie-breaker.
+    public func exportRecoveryCopy() throws -> Data {
+        guard let recoveryFileURL else { throw WorkoutBackupError.noRecoveryCopy }
+        let properties = try recoveryFileURL.resourceValues(forKeys: [.isRegularFileKey])
+        guard properties.isRegularFile == true else { throw CocoaError(.fileReadUnknown) }
+        let handle = try FileHandle(forReadingFrom: recoveryFileURL)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: Self.maxBackupBytes + 1) ?? Data()
+        guard data.count <= Self.maxBackupBytes else { throw WorkoutBackupError.tooLarge }
+        return data
+    }
+
     /// Validates without mutating data. Show this summary before confirming a restore.
     public func backupSummary(_ data: Data) throws -> WorkoutBackupSummary {
         let snapshot = try decodeSnapshot(data)
@@ -291,8 +310,7 @@ public final class WorkoutStore {
         try write(snapshot)
         apply(snapshot)
         hasUnsavedChanges = false
-        recoveryNotice = nil
-        persistenceError = nil
+        persistenceError = recoveryNotice
     }
 
     private var currentSnapshot: Snapshot {
@@ -340,6 +358,7 @@ public final class WorkoutStore {
     }
 
     private func load() {
+        discoverRecoveryCopy()
         let data: Data
         do {
             let properties = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
@@ -360,6 +379,7 @@ public final class WorkoutStore {
         }
         do {
             apply(try decodeSnapshot(data))
+            persistenceError = recoveryNotice
         } catch WorkoutBackupError.unsupportedVersion {
             canWrite = false
             persistenceError = "This Pep data uses a different app version. Update to a newer Pep version to open it. Your saved file is unchanged."
@@ -371,13 +391,39 @@ public final class WorkoutStore {
             let backup = fileURL.deletingPathExtension().appendingPathExtension("recovered-\(UUID().uuidString).json")
             do {
                 try FileManager.default.moveItem(at: fileURL, to: backup)
-                recoveryNotice = "Pep couldn't read your saved data. A backup was kept as \(backup.lastPathComponent). You can start fresh, and the backup will stay safe."
+                rememberRecoveryCopy(backup)
+                discoverRecoveryCopy()
                 persistenceError = recoveryNotice
             } catch {
                 canWrite = false
                 persistenceError = "Pep couldn't read or back up your saved data. Your original file is unchanged. New changes cannot be saved until the file is accessible."
             }
         }
+    }
+
+    private func discoverRecoveryCopy() {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: fileURL.deletingLastPathComponent(),
+                                                                       includingPropertiesForKeys: keys) else { return }
+        let prefix = fileURL.deletingPathExtension().lastPathComponent + ".recovered-"
+        let candidates = files.compactMap { url -> (url: URL, modified: Date)? in
+            guard url.pathExtension == "json", url.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(url.deletingPathExtension().lastPathComponent.dropFirst(prefix.count))) != nil,
+                  let properties = try? url.resourceValues(forKeys: Set(keys)),
+                  properties.isRegularFile == true else { return nil }
+            return (url, properties.contentModificationDate ?? .distantPast)
+        }
+        if let latest = candidates.max(by: { left, right in
+            if left.modified == right.modified { return left.url.lastPathComponent < right.url.lastPathComponent }
+            return left.modified < right.modified
+        }) {
+            rememberRecoveryCopy(latest.url)
+        }
+    }
+
+    private func rememberRecoveryCopy(_ url: URL) {
+        recoveryFileURL = url
+        recoveryNotice = "A recovery backup was kept as \(url.lastPathComponent). Export the preserved file from Settings > Back up & restore. It may need repair; your current log stays separate."
     }
 
     private func decodeSnapshot(_ data: Data) throws -> Snapshot {

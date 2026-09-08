@@ -192,27 +192,30 @@ private struct ExerciseLoggingCard: View {
     let index: Int
     let focusedInput: FocusState<WorkoutInputField?>.Binding
     let onValidation: (UUID, Bool) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 Text(String(format: "%02d", index)).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(RCTheme.accentText).padding(.top, 3)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(exercise.name).font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text(exercise.name).font(.system(.headline, design: .rounded))
                     Label("\(exercise.restSeconds)s rest between sets", systemImage: "timer")
-                        .font(.system(size: 11)).foregroundStyle(RCTheme.muted)
+                        .font(.caption).foregroundStyle(RCTheme.muted)
                 }
                 Spacer(minLength: 0)
                 Text("\(exercise.sets.filter(\.isComplete).count)/\(exercise.sets.count)")
                     .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(RCTheme.muted)
             }
-            HStack(spacing: 10) {
-                Text("SET").frame(width: 30)
-                Text(store.unit.symbol.uppercased()).frame(maxWidth: .infinity)
-                Text("REPS").frame(maxWidth: .infinity)
-                Text("DONE").frame(width: 44)
-                Color.clear.frame(width: 44, height: 1)
-            }.font(.system(size: 10, weight: .bold, design: .rounded)).tracking(0.8).foregroundStyle(RCTheme.muted)
+            if !dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 10) {
+                    Text("SET").frame(width: 30)
+                    Text(store.unit.symbol.uppercased()).frame(maxWidth: .infinity)
+                    Text("REPS").frame(maxWidth: .infinity)
+                    Text("DONE").frame(width: 44)
+                    Color.clear.frame(width: 44, height: 1)
+                }.font(.system(size: 10, weight: .bold, design: .rounded)).tracking(0.8).foregroundStyle(RCTheme.muted)
+            }
 
             ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { setIndex, set in
                 WorkoutSetRow(store: store, exerciseID: exercise.id, exerciseIndex: index - 1, set: set, number: setIndex + 1, restSeconds: exercise.restSeconds, canRemove: exercise.sets.count > 1, focusedInput: focusedInput, onValidation: onValidation)
@@ -241,6 +244,8 @@ private struct WorkoutSetRow: View {
     @State private var repsText: String
     @State private var showingError = false
     @Environment(\.pepReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var useAccessibleLayout: Bool { dynamicTypeSize.isAccessibilitySize }
 
     init(store: WorkoutStore, exerciseID: UUID, exerciseIndex: Int, set: WorkoutSet, number: Int, restSeconds: Int, canRemove: Bool, focusedInput: FocusState<WorkoutInputField?>.Binding, onValidation: @escaping (UUID, Bool) -> Void) {
         self.store = store
@@ -258,48 +263,34 @@ private struct WorkoutSetRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 10) {
-                Text("\(number)").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(set.isComplete ? RCTheme.accentText : RCTheme.muted).frame(width: 30)
-                TextField("0", text: $weightDraft.text)
-                    .flowDecimalKeyboard().focused(focusedInput, equals: .weight(set.id))
-                    .accessibilityLabel("Set \(number) weight in \(store.unit.symbol)")
-                    .accessibilityIdentifier("workout.set.weight.\(exerciseIndex).\(number - 1)")
-                    .onChange(of: weightDraft.text) { _, _ in showingError = !persistIfValid() }
-                    .modifier(FlowNumberField())
-                TextField("8", text: $repsText)
-                    .flowIntegerKeyboard().focused(focusedInput, equals: .reps(set.id))
-                    .accessibilityLabel("Set \(number) repetitions")
-                    .accessibilityIdentifier("workout.set.reps.\(exerciseIndex).\(number - 1)")
-                    .onChange(of: repsText) { _, _ in showingError = !persistIfValid() }
-                    .modifier(FlowNumberField())
-                Button {
-                    guard persistIfValid() else { showingError = true; return }
-                    focusedInput.wrappedValue = nil
-                    let wasComplete = store.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == set.id })?.isComplete ?? set.isComplete
-                    guard store.toggleSet(exerciseID: exerciseID, setID: set.id) else { return }
-                    RCTheme.impact()
-                    if !wasComplete { store.beginRest(seconds: restSeconds) }
-                } label: {
-                    Image(systemName: "checkmark")
-                        .scaleEffect(set.isComplete && !reduceMotion && RCAppearance.shared.motionEnabled ? 1.10 : 1)
-                        .animation(reduceMotion || !RCAppearance.shared.motionEnabled ? nil : .spring(response: 0.32, dampingFraction: 0.5), value: set.isComplete)
-                        .font(.system(size: 16, weight: .bold)).frame(width: 44, height: 44)
-                        .foregroundStyle(set.isComplete ? RCTheme.onAccent : RCTheme.muted)
-                        .background(set.isComplete ? RCTheme.accent : RCTheme.background, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(set.isComplete ? Color.clear : RCTheme.border, lineWidth: 1))
-                }.buttonStyle(RCPressStyle()).accessibilityLabel(set.isComplete ? "Mark set \(number) incomplete" : "Complete set \(number)")
-                    .accessibilityIdentifier("workout.set.complete.\(exerciseIndex).\(number - 1)")
-                Button(role: .destructive) {
-                    focusedInput.wrappedValue = nil
-                    if store.removeSet(exerciseID: exerciseID, setID: set.id) { onValidation(set.id, true) }
-                } label: {
-                    Image(systemName: "minus.circle").font(.system(size: 15)).frame(width: 44, height: 44)
-                }.buttonStyle(.plain).foregroundStyle(RCTheme.muted).disabled(!canRemove).opacity(canRemove ? 1 : 0.25)
-                    .accessibilityLabel("Remove set \(number)")
+            if useAccessibleLayout {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Set \(number)").font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(set.isComplete ? RCTheme.accentText : RCTheme.text)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Weight · \(store.unit.symbol)").font(.headline)
+                        weightField
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Repetitions").font(.headline)
+                        repsField
+                    }
+                    completionButton
+                    removeButton
+                }.padding(.vertical, 12)
+            } else {
+                HStack(spacing: 10) {
+                    Text("\(number)").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(set.isComplete ? RCTheme.accentText : RCTheme.muted).frame(width: 30)
+                    weightField
+                    repsField
+                    completionButton
+                    removeButton
+                }
             }
             if showingError {
                 Text("Enter 0–\(FlowFormat.number(store.unit.value(fromKilograms: 1_500))) \(store.unit.symbol) and 1–1,000 reps.")
-                    .font(.system(size: 11)).foregroundStyle(RCTheme.accentText).padding(.leading, 40)
+                    .font(useAccessibleLayout ? .callout : .system(size: 11)).foregroundStyle(RCTheme.accentText)
+                    .padding(.leading, useAccessibleLayout ? 0 : 40).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("workout.set.error.\(exerciseIndex).\(number - 1)")
             }
         }
@@ -309,6 +300,72 @@ private struct WorkoutSetRow: View {
                 showingError = !persistIfValid()
             }
         }
+    }
+
+    private var weightField: some View {
+        TextField("0", text: $weightDraft.text)
+            .flowDecimalKeyboard().focused(focusedInput, equals: .weight(set.id))
+            .accessibilityLabel("Set \(number) weight in \(store.unit.symbol)")
+            .accessibilityIdentifier("workout.set.weight.\(exerciseIndex).\(number - 1)")
+            .onChange(of: weightDraft.text) { _, _ in showingError = !persistIfValid() }
+            .modifier(FlowNumberField())
+    }
+
+    private var repsField: some View {
+        TextField("8", text: $repsText)
+            .flowIntegerKeyboard().focused(focusedInput, equals: .reps(set.id))
+            .accessibilityLabel("Set \(number) repetitions")
+            .accessibilityIdentifier("workout.set.reps.\(exerciseIndex).\(number - 1)")
+            .onChange(of: repsText) { _, _ in showingError = !persistIfValid() }
+            .modifier(FlowNumberField())
+    }
+
+    private var completionButton: some View {
+        Button {
+            guard persistIfValid() else { showingError = true; return }
+            focusedInput.wrappedValue = nil
+            let wasComplete = store.activeSession?.exercises.first(where: { $0.id == exerciseID })?.sets.first(where: { $0.id == set.id })?.isComplete ?? set.isComplete
+            guard store.toggleSet(exerciseID: exerciseID, setID: set.id) else { return }
+            RCTheme.impact()
+            if !wasComplete { store.beginRest(seconds: restSeconds) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark")
+                    .scaleEffect(set.isComplete && !reduceMotion && RCAppearance.shared.motionEnabled ? 1.10 : 1)
+                    .animation(reduceMotion || !RCAppearance.shared.motionEnabled ? nil : .spring(response: 0.32, dampingFraction: 0.5), value: set.isComplete)
+                    .font(.system(size: 16, weight: .bold)).frame(width: 44, height: 44)
+                if useAccessibleLayout {
+                    Text(set.isComplete ? "Mark incomplete" : "Complete set")
+                        .font(.system(.body, design: .rounded, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }.frame(maxWidth: useAccessibleLayout ? .infinity : nil, minHeight: 44)
+                .padding(.horizontal, useAccessibleLayout ? 10 : 0).padding(.vertical, useAccessibleLayout ? 8 : 0)
+                .foregroundStyle(set.isComplete ? RCTheme.onAccent : RCTheme.muted)
+                .background(set.isComplete ? RCTheme.accent : RCTheme.background, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(set.isComplete ? Color.clear : RCTheme.border, lineWidth: 1))
+        }.buttonStyle(RCPressStyle()).accessibilityLabel(set.isComplete ? "Mark set \(number) incomplete" : "Complete set \(number)")
+            .accessibilityIdentifier("workout.set.complete.\(exerciseIndex).\(number - 1)")
+    }
+
+    private var removeButton: some View {
+        Button(role: .destructive) {
+            focusedInput.wrappedValue = nil
+            if store.removeSet(exerciseID: exerciseID, setID: set.id) { onValidation(set.id, true) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "minus.circle").font(.system(size: 15)).frame(width: 44, height: 44)
+                if useAccessibleLayout {
+                    Text("Remove set").font(.system(.body, design: .rounded))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }.frame(maxWidth: useAccessibleLayout ? .infinity : nil, minHeight: 44)
+                .padding(.horizontal, useAccessibleLayout ? 10 : 0)
+                .padding(.vertical, useAccessibleLayout ? 8 : 0)
+        }.buttonStyle(.plain).foregroundStyle(RCTheme.muted).disabled(!canRemove).opacity(canRemove ? 1 : 0.25)
+            .accessibilityLabel("Remove set \(number)")
+            .accessibilityIdentifier("workout.set.remove.\(exerciseIndex).\(number - 1)")
     }
 
     @discardableResult private func persistIfValid() -> Bool {
@@ -345,8 +402,10 @@ struct FlowMetric: View {
 }
 
 struct FlowNumberField: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     func body(content: Content) -> some View {
-        content.font(.system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
+        content.font(dynamicTypeSize.isAccessibilitySize ? .system(.body, design: .rounded, weight: .medium) : .system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
             .multilineTextAlignment(.center).padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 44)
             .textFieldStyle(.plain).foregroundStyle(RCTheme.text)
             .background(RCTheme.background, in: RoundedRectangle(cornerRadius: 12))
