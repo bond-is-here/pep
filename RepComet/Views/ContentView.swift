@@ -79,6 +79,7 @@ struct ContentView: View {
                         Image(systemName: tab.symbol).font(.system(size: 19, weight: selected ? .semibold : .regular))
                             .frame(height: 22)
                         Text(tab.rawValue).font(.system(.caption, design: .rounded, weight: selected ? .bold : .medium))
+                            .lineLimit(1).minimumScaleFactor(0.45)
                     }.foregroundStyle(selected ? RCTheme.accentText : RCTheme.muted)
                         .frame(maxWidth: .infinity).frame(minHeight: 57).padding(.vertical, 4)
                         .background {

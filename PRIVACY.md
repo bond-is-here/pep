@@ -59,6 +59,8 @@ Pep keeps local records until you change or remove them. You can delete an
 individual weight check-in from Progress, a saved workout from its recap, and
 routines from the routine editor. Deleting a routine preserves its saved workout
 history. Deleting a workout updates your progress and milestone counts.
+Individual deletions affect the current log; preserved recovery copies remain
+until the app is deleted. Exported copies must be managed separately.
 
 To remove all Pep data stored in the current iPhone app container:
 
